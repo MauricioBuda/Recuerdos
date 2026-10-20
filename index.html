@@ -1,0 +1,406 @@
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f7f5f0" />
+    <meta
+      name="description"
+      content="Un espacio privado para guardar y volver a vivir nuestros recuerdos."
+    />
+    <title>Nuestros recuerdos</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <script type="module" src="/src/main.js"></script>
+  </head>
+
+  <body>
+    <div id="app">
+      <header class="site-header">
+        <a class="brand" href="#recuerdos" aria-label="Nuestros recuerdos, inicio">
+          <span class="brand-mark" aria-hidden="true">♡</span>
+          <span class="brand-name">nuestros recuerdos</span>
+        </a>
+
+        <div class="session-area">
+          <span id="current-user" class="current-user" hidden></span>
+          <button id="sign-out-button" class="button button-quiet" type="button" hidden>
+            Cerrar sesión
+          </button>
+        </div>
+      </header>
+
+      <main>
+        <!-- Acceso privado -->
+        <section id="login-section" class="login-section" aria-labelledby="login-title">
+          <div class="login-card">
+            <p class="eyebrow">Un lugar solo nuestro</p>
+            <h1 id="login-title">Cada recuerdo tiene su lugar.</h1>
+            <p class="login-description">
+              Fotos, videos, audios e historias para guardar y volver a disfrutar juntos.
+            </p>
+            <button id="google-sign-in-button" class="button button-primary" type="button">
+              <span aria-hidden="true" class="google-mark">G</span>
+              Continuar con Google
+            </button>
+            <p id="login-message" class="form-message" role="status" aria-live="polite">
+              Iniciá sesión con una cuenta autorizada para continuar.
+            </p>
+          </div>
+        </section>
+
+        <!-- Aplicación privada -->
+        <div id="private-app" hidden>
+          <nav class="main-navigation" aria-label="Secciones principales">
+            <a class="nav-link" href="#carpetas" data-section-link="carpetas">Carpetas</a>
+            <a class="nav-link" href="#subir" data-section-link="subir">Subir un recuerdo</a>
+            <a class="nav-link" href="#recuerdos" data-section-link="recuerdos">Ver recuerdos</a>
+          </nav>
+
+          <!-- SECCIÓN: CARPETAS -->
+          <section id="carpetas" class="page-section folders-section" aria-labelledby="folders-title">
+            <div class="section-heading">
+              <p class="eyebrow">Organizar momentos</p>
+              <h1 id="folders-title">Nuestras carpetas</h1>
+              <p>Cada carpeta tiene un título y una categoría. Los recuerdos guardan su propia descripción.</p>
+            </div>
+            <form id="folder-form" class="folder-form">
+              <div class="form-grid">
+                <div class="form-control">
+                  <label for="folder-title">Título de la carpeta</label>
+                  <input id="folder-title" name="folderTitle" maxlength="100" required placeholder="Ej.: Vacaciones 2027" />
+                </div>
+                <div class="form-control">
+                  <label for="folder-category">Categoría de la carpeta</label>
+                  <select id="folder-category" name="folderCategory" required>
+                    <option value="">Elegir categoría</option>
+                    <option value="Vacaciones">Vacaciones</option><option value="Familia">Familia</option>
+                    <option value="Pareja">Pareja</option><option value="Amigos">Amigos</option>
+                    <option value="Mascotas">Mascotas</option><option value="Otros">Otros</option>
+                    <option value="__crear__">+ Crear categoría</option>
+                  </select>
+                </div>
+                <div id="new-folder-category-control" class="form-control" hidden>
+                  <label for="new-folder-category">Nueva categoría</label>
+                  <input id="new-folder-category" maxlength="60" placeholder="Ej.: Cumpleaños" />
+                </div>
+              </div>
+              <p id="folder-form-message" class="form-message" role="status" aria-live="polite"></p>
+              <div class="form-actions"><button class="button button-primary" type="submit">Crear carpeta</button></div>
+            </form>
+            <div id="folders-grid" class="folders-grid"></div>
+          </section>
+
+          <!-- SECCIÓN 1: SUBIR RECUERDOS -->
+          <section id="subir" class="page-section upload-section" aria-labelledby="upload-title">
+            <div class="section-heading">
+              <p class="eyebrow">Guardar un momento</p>
+              <h1 id="upload-title">Sumá un recuerdo</h1>
+              <p>Elegí un archivo o creá uno ahora. Después, contanos qué significa para ustedes.</p>
+            </div>
+
+            <form id="memory-form" class="memory-form">
+              <input id="memory-id" name="memoryId" type="hidden" />
+
+              <fieldset class="form-fieldset">
+                <legend>¿Qué querés guardar?</legend>
+
+                <div class="media-choice-grid">
+                  <label class="media-choice" for="photo-input">
+                    <span class="media-choice-icon" aria-hidden="true">▧</span>
+                    <span class="media-choice-title">Fotos</span>
+                    <span class="media-choice-help">Elegir de la galería</span>
+                    <input
+                      id="photo-input"
+                      name="photo"
+                      type="file"
+                      accept="image/*"
+                      multiple
+                    />
+                  </label>
+
+                  <label class="media-choice" for="video-input">
+                    <span class="media-choice-icon" aria-hidden="true">▷</span>
+                    <span class="media-choice-title">Videos</span>
+                    <span class="media-choice-help">Elegir de la galería</span>
+                    <input
+                      id="video-input"
+                      name="video"
+                      type="file"
+                      accept="video/*"
+                      multiple
+                    />
+                  </label>
+
+                  <label class="media-choice" for="audio-input">
+                    <span class="media-choice-icon" aria-hidden="true">♫</span>
+                    <span class="media-choice-title">Audios</span>
+                    <span class="media-choice-help">Elegir un archivo</span>
+                    <input
+                      id="audio-input"
+                      name="audio"
+                      type="file"
+                      accept="audio/*"
+                      multiple
+                    />
+                  </label>
+                </div>
+
+                <div id="selected-files" class="selected-files" aria-live="polite">
+                  <p class="muted-text">Todavía no seleccionaste ningún archivo.</p>
+                </div>
+              </fieldset>
+
+              <fieldset class="form-fieldset">
+                <legend>Crear algo ahora</legend>
+
+                <div class="capture-grid">
+                  <div class="capture-panel">
+                    <h2>Usar la cámara</h2>
+                    <p>Activá la cámara para sacar una foto o grabar un video.</p>
+
+                    <div class="capture-preview">
+                      <video
+                        id="camera-preview"
+                        class="camera-preview"
+                        autoplay
+                        muted
+                        playsinline
+                        hidden
+                      ></video>
+                      <p id="camera-placeholder" class="capture-placeholder">
+                        La vista previa aparecerá acá.
+                      </p>
+                    </div>
+
+                    <div class="button-row">
+                      <button id="start-camera-button" class="button button-secondary" type="button">
+                        Activar cámara
+                      </button>
+                      <button id="take-photo-button" class="button button-secondary" type="button" disabled>
+                        Sacar foto
+                      </button>
+                      <button id="start-video-button" class="button button-secondary" type="button" disabled>
+                        Grabar video
+                      </button>
+                      <button id="stop-video-button" class="button button-quiet" type="button" disabled>
+                        Detener video
+                      </button>
+                      <button id="stop-camera-button" class="button button-quiet" type="button" disabled>
+                        Apagar cámara
+                      </button>
+                    </div>
+
+                    <canvas id="photo-canvas" hidden></canvas>
+                  </div>
+
+                  <div class="capture-panel">
+                    <h2>Grabar un audio</h2>
+                    <p>Grabá una voz, un mensaje o un sonido para guardar.</p>
+
+                    <div class="audio-status">
+                      <span id="audio-status-indicator" class="status-indicator" aria-hidden="true"></span>
+                      <span id="audio-status-text" role="status" aria-live="polite">
+                        Listo para grabar
+                      </span>
+                    </div>
+
+                    <div class="button-row">
+                      <button id="start-audio-button" class="button button-secondary" type="button">
+                        Empezar a grabar
+                      </button>
+                      <button id="stop-audio-button" class="button button-quiet" type="button" disabled>
+                        Terminar grabación
+                      </button>
+                    </div>
+
+                    <audio id="audio-preview" controls hidden></audio>
+                  </div>
+                </div>
+
+                <p class="help-text">
+                  El acceso a la cámara y al micrófono requiere tu permiso y una conexión segura
+                  (HTTPS) o localhost. La disponibilidad depende del navegador y del dispositivo.
+                </p>
+              </fieldset>
+
+              <fieldset class="form-fieldset">
+                <legend>Contanos sobre este recuerdo</legend>
+
+                <div class="form-grid">
+                  <div class="form-control form-control-wide">
+                    <label for="memory-description">Texto del recuerdo (si no adjuntás archivos)</label>
+                    <textarea
+                      id="memory-description"
+                      name="description"
+                      rows="4"
+                      maxlength="2000"
+                      placeholder="Escribí un recuerdo sin adjuntar archivos..."
+                    ></textarea>
+                  </div>
+
+                  <div class="form-control form-control-wide">
+                    <label for="memory-folder">Carpeta</label>
+                    <select id="memory-folder" name="folderId">
+                      <option value="">Sin organizar</option>
+                    </select>
+                    <span class="help-text">La categoría corresponde a la carpeta, no a cada archivo.</span>
+                  </div>
+
+                  <div class="form-control">
+                    <label for="memory-date">Fecha del recuerdo</label>
+                    <input id="memory-date" name="memoryDate" type="date" />
+                    <span class="help-text">Cuándo ocurrió, aunque haya sido hace años.</span>
+                  </div>
+                </div>
+              </fieldset>
+
+              <div id="upload-progress-area" class="upload-progress-area" hidden>
+                <p id="upload-status" role="status" aria-live="polite">Preparando...</p>
+                <progress id="upload-progress" max="100" value="0">0%</progress>
+              </div>
+
+              <p id="memory-form-message" class="form-message" role="status" aria-live="polite"></p>
+
+              <div class="form-actions">
+                <button id="cancel-edit-button" class="button button-quiet" type="button" hidden>
+                  Cancelar edición
+                </button>
+                <button id="save-memory-button" class="button button-primary" type="submit">
+                  Guardar recuerdo
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <!-- SECCIÓN 2: VER RECUERDOS -->
+          <section id="recuerdos" class="page-section memories-section" aria-labelledby="memories-title">
+            <div class="section-heading">
+              <p class="eyebrow">Volver a esos momentos</p>
+              <h1 id="memories-title">Nuestros recuerdos</h1>
+              <p>Entrá a las carpetas o explorá todos los recuerdos, estén organizados o no.</p>
+            </div>
+
+            <div class="memory-tools">
+              <div class="form-control search-control">
+                <label for="memory-search">Buscar por descripción o nombre de archivo</label>
+                <input
+                  id="memory-search"
+                  name="search"
+                  type="search"
+                  placeholder="Ej.: playa, cumpleaños..."
+                  autocomplete="off"
+                />
+              </div>
+
+              <div class="form-control">
+                <label for="filter-category">Categoría</label>
+                <select id="filter-category" name="filterCategory">
+                  <option value="">Todas las categorías</option>
+                </select>
+              </div>
+
+              <div class="form-control">
+                <label for="filter-type">Tipo de contenido</label>
+                <select id="filter-type" name="filterType">
+                  <option value="">Todos los tipos</option>
+                  <option value="image">Fotos</option>
+                  <option value="video">Videos</option>
+                  <option value="audio">Audios</option>
+                  <option value="text">Textos</option>
+                </select>
+              </div>
+
+              <div class="form-control">
+                <label for="sort-memories">Ordenar por</label>
+                <select id="sort-memories" name="sort">
+                  <option value="uploaded-desc">Subidos recientemente</option>
+                  <option value="uploaded-asc">Subidos hace más tiempo</option>
+                  <option value="memory-desc">Fecha del recuerdo: más recientes</option>
+                  <option value="memory-asc">Fecha del recuerdo: más antiguos</option>
+                  <option value="description-asc">Descripción: A-Z</option>
+                  <option value="description-desc">Descripción: Z-A</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="memories-summary">
+              <p id="memories-count" aria-live="polite">Cargando recuerdos...</p>
+              <div class="summary-actions">
+                <button id="show-all-memories-button" class="button button-secondary" type="button">Ver todos</button>
+                <button id="show-unorganized-button" class="button button-secondary" type="button">Sin organizar</button>
+                <button id="clear-filters-button" class="button button-quiet" type="button">Limpiar filtros</button>
+              </div>
+            </div>
+
+            <div id="memories-loading" class="state-message" role="status" aria-live="polite">
+              <span class="loading-indicator" aria-hidden="true"></span>
+              <p>Preparando sus recuerdos...</p>
+            </div>
+
+            <div id="memories-empty" class="state-message" hidden>
+              <span class="empty-mark" aria-hidden="true">♡</span>
+              <h2>Todavía no hay recuerdos para mostrar</h2>
+              <p>Cuando guarden el primero, va a aparecer acá.</p>
+              <a class="button button-primary" href="#subir">Subir un recuerdo</a>
+            </div>
+
+            <div id="memories-error" class="state-message error-message" role="alert" hidden>
+              <h2>No pudimos cargar los recuerdos</h2>
+              <p id="memories-error-text">Revisá tu conexión e intentá nuevamente.</p>
+              <button id="retry-memories-button" class="button button-secondary" type="button">
+                Reintentar
+              </button>
+            </div>
+
+            <div id="memories-grid" class="memories-grid" aria-live="polite"></div>
+          </section>
+        </div>
+      </main>
+
+      <footer class="site-footer">
+        <p>Un espacio privado para lo que queremos recordar.</p>
+      </footer>
+    </div>
+
+    <!-- Confirmación previa a eliminar -->
+    <dialog
+      id="delete-confirmation-dialog"
+      class="confirmation-dialog"
+      aria-labelledby="delete-dialog-title"
+    >
+      <form method="dialog" class="dialog-content">
+        <h2 id="delete-dialog-title">¿Eliminar este recuerdo?</h2>
+        <p>Esta acción puede borrar el archivo y sus datos asociados. No se puede deshacer.</p>
+        <div class="form-actions">
+          <button id="cancel-delete-button" class="button button-quiet" value="cancel">
+            Cancelar
+          </button>
+          <button id="confirm-delete-button" class="button button-danger" value="confirm">
+            Eliminar
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Visor de fotos ampliadas -->
+    <dialog id="photo-viewer-dialog" class="photo-viewer-dialog" aria-label="Foto ampliada">
+      <div class="photo-viewer-layout">
+        <div class="photo-viewer-toolbar">
+          <p id="photo-viewer-caption" class="photo-viewer-caption">Foto</p>
+          <div class="photo-viewer-controls">
+            <button id="photo-zoom-out" class="photo-viewer-button" type="button" aria-label="Alejar imagen" title="Alejar">−</button>
+            <span id="photo-zoom-level" class="photo-zoom-level">100%</span>
+            <button id="photo-zoom-in" class="photo-viewer-button" type="button" aria-label="Acercar imagen" title="Acercar">+</button>
+            <button id="photo-zoom-reset" class="photo-viewer-button photo-viewer-reset" type="button">Ajustar</button>
+            <button id="photo-viewer-close" class="photo-viewer-button photo-viewer-close" type="button" aria-label="Cerrar foto" title="Cerrar">×</button>
+          </div>
+        </div>
+        <div id="photo-viewer-stage" class="photo-viewer-stage">
+          <img id="photo-viewer-image" class="photo-viewer-image" alt="Foto ampliada" />
+        </div>
+        <p class="photo-viewer-help">Usá + y −, la rueda del mouse o pellizcá la pantalla para ajustar el zoom. Podés desplazarte por la imagen cuando está ampliada.</p>
+      </div>
+    </dialog>
+  </body>
+</html>
