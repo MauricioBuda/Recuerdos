@@ -2,11 +2,10 @@ import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import { auth, googleProvider } from "./firebase.js";
 
 // ============================================================
-// NUESTROS RECUERDOS — lógica inicial de la interfaz
+// NUESTROS RECUERDOS — interfaz con persistencia en Google Drive
 // Archivo: src/main.js
-//
-// Esta versión funciona localmente durante la sesión del navegador.
-// Todavía NO guarda datos en Firebase ni archivos en Google Drive.
+// La autenticación usa Firebase; los datos y archivos se guardan en el Drive
+// propietario a través de un puente HtmlService de Apps Script.
 // ============================================================
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -103,10 +102,193 @@ const state = {
   isEditing: false,
   nextId: 1,
   objectUrls: new Set(),
+  backendReady: false,
+  backendUserUid: null,
+  backendLoadPromise: null,
 };
 
-// Las tres cuentas autorizadas se configurarán en Firebase.
-// No se debe usar el modo local como control de seguridad.
+// Puente seguro entre la aplicación Vite y Apps Script. Apps Script se abre
+// en un iframe propio porque el navegador no permite leer directamente las
+// respuestas de ContentService desde localhost por CORS.
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw2fk8dvKthMnejYIt3EfZIr1s98s0U70NYFF2A3Gc2mFuAUoGUqjxwWpwAkLbPqaK2/exec";
+const BRIDGE_CHANNEL = "NUESTROS_RECUERDOS_DRIVE_BRIDGE_V1";
+const MAX_FILE_BYTES = 12 * 1024 * 1024;
+let driveBridgeFrame = null;
+let driveBridgeChildWindow = null;
+let driveBridgeReadyResolve = null;
+let driveBridgeReadyReject = null;
+let driveBridgeReadyTimer = null;
+let driveBridgeReadyPromise = null;
+let driveBridgeRequestNumber = 0;
+const driveBridgePending = new Map();
+
+function getDriveBridge() {
+  if (driveBridgeFrame) return driveBridgeReadyPromise;
+
+  driveBridgeReadyPromise = new Promise((resolve, reject) => {
+    driveBridgeReadyResolve = resolve;
+    driveBridgeReadyReject = reject;
+  });
+  driveBridgeReadyTimer = setTimeout(() => {
+    driveBridgeReadyReject?.(new Error("Apps Script no respondió. Verificá que hayas agregado Bridge.html y actualizado el despliegue."));
+    driveBridgeReadyReject = null;
+  }, 30000);
+
+  window.addEventListener("message", (event) => {
+    if (!driveBridgeFrame) return;
+    const message = event.data;
+    if (!message || message.channel !== BRIDGE_CHANNEL) return;
+
+    // Apps Script agrega iframes internos de sandbox. El código HTML del
+    // puente no emite los mensajes desde driveBridgeFrame.contentWindow,
+    // sino desde un iframe descendiente alojado en googleusercontent.com.
+    const origin = event.origin || "";
+    const trustedOrigin = origin === "https://script.google.com" ||
+      /^https:\/\/(?:[a-z0-9-]+\.)*googleusercontent\.com$/i.test(origin);
+    if (!trustedOrigin) return;
+
+    if (message.type === "ready") {
+      // Verificamos que la ventana emisora sea descendiente del iframe
+      // de Apps Script y la guardamos para enviarle las solicitudes.
+      let sourceWindow = event.source;
+      let belongsToBridge = false;
+      for (let level = 0; level < 5 && sourceWindow; level += 1) {
+        if (sourceWindow === driveBridgeFrame.contentWindow) {
+          belongsToBridge = true;
+          break;
+        }
+        try {
+          sourceWindow = sourceWindow.parent;
+        } catch (_) {
+          break;
+        }
+      }
+      if (!belongsToBridge || !event.source) return;
+      driveBridgeChildWindow = event.source;
+      if (driveBridgeReadyTimer) clearTimeout(driveBridgeReadyTimer);
+      driveBridgeReadyTimer = null;
+      driveBridgeReadyResolve?.();
+      driveBridgeReadyResolve = null;
+      driveBridgeReadyReject = null;
+      return;
+    }
+
+    if (event.source !== driveBridgeChildWindow) return;
+    if (message.type !== "result" || !message.requestId) return;
+    const pending = driveBridgePending.get(message.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timeout);
+    driveBridgePending.delete(message.requestId);
+    if (message.ok) pending.resolve(message.data);
+    else pending.reject(new Error(message.error || "Apps Script no pudo completar la operación."));
+  });
+
+  driveBridgeFrame = document.createElement("iframe");
+  driveBridgeFrame.title = "Conexión privada con Google Drive";
+  driveBridgeFrame.setAttribute("aria-hidden", "true");
+  driveBridgeFrame.tabIndex = -1;
+  driveBridgeFrame.style.cssText = "position:fixed;width:1px;height:1px;left:-10px;bottom:0;border:0;opacity:0;pointer-events:none";
+  driveBridgeFrame.src = `${APPS_SCRIPT_URL}?bridge=1`;
+  document.body.append(driveBridgeFrame);
+  return driveBridgeReadyPromise;
+}
+
+async function callDriveBridge(action, payload = {}) {
+  const user = auth.currentUser;
+  if (!user) throw new Error("La sesión de Google expiró. Iniciá sesión nuevamente.");
+  try {
+    await getDriveBridge();
+  } catch (error) {
+    driveBridgeFrame?.remove();
+    driveBridgeFrame = null;
+    driveBridgeChildWindow = null;
+    driveBridgeReadyPromise = null;
+    driveBridgeReadyResolve = null;
+    driveBridgeReadyReject = null;
+    if (driveBridgeReadyTimer) clearTimeout(driveBridgeReadyTimer);
+    driveBridgeReadyTimer = null;
+    throw error;
+  }
+  const token = await user.getIdToken();
+  const requestId = `nr-${Date.now()}-${++driveBridgeRequestNumber}`;
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      driveBridgePending.delete(requestId);
+      reject(new Error("La conexión con Google Drive tardó demasiado. Volvé a intentar."));
+    }, 180000);
+    driveBridgePending.set(requestId, { resolve, reject, timeout });
+    if (!driveBridgeChildWindow) {
+      clearTimeout(timeout);
+      driveBridgePending.delete(requestId);
+      reject(new Error("El puente de Apps Script no quedó listo para recibir solicitudes."));
+      return;
+    }
+    driveBridgeChildWindow.postMessage({
+      channel: BRIDGE_CHANNEL,
+      type: "request",
+      requestId,
+      action,
+      token,
+      payload,
+    }, "*");
+  });
+}
+
+function fileToBase64(file) {
+  if (file.size > MAX_FILE_BYTES) {
+    throw new Error(`El archivo «${file.name}» supera el límite de 12 MB por archivo. Reducí su tamaño e intentá nuevamente.`);
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`No se pudo leer el archivo «${file.name}».`));
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const comma = result.indexOf(",");
+      if (comma < 0) return reject(new Error(`No se pudo preparar el archivo «${file.name}».`));
+      resolve(result.slice(comma + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function refreshDataFromDrive() {
+  state.backendReady = false;
+  elements.memoriesLoading.hidden = false;
+  elements.memoriesEmpty.hidden = true;
+  elements.memoriesError.hidden = true;
+  elements.memoriesCount.textContent = "Conectando con Google Drive...";
+  try {
+    const data = await callDriveBridge("load");
+    state.folders = Array.isArray(data.folders) ? data.folders : [];
+    state.memories = (Array.isArray(data.memories) ? data.memories : []).map((memory) => ({
+      ...memory,
+      file: null,
+      fileUrl: "",
+    }));
+    state.backendReady = true;
+    state.backendUserUid = auth.currentUser?.uid || null;
+    refreshFolderOptions();
+    elements.memoriesLoading.hidden = true;
+    elements.memoriesError.hidden = true;
+    renderFolders();
+    renderMemories();
+    setMessage(elements.loginMessage, `Conectado con Google Drive. ${state.memories.length} recuerdo(s) cargado(s).`, "success");
+  } catch (error) {
+    console.error("No se pudo cargar la información desde Google Drive:", error);
+    state.backendReady = false;
+    elements.memoriesLoading.hidden = true;
+    elements.memoriesEmpty.hidden = true;
+    elements.memoriesError.hidden = false;
+    elements.memoriesErrorText.textContent = `No se pudieron cargar los recuerdos desde Drive. ${error.message || error}`;
+    elements.memoriesCount.textContent = "No se pudo conectar con Google Drive";
+    setMessage(elements.loginMessage, "Iniciaste sesión, pero la conexión con Google Drive falló. Revisá el mensaje en «Ver recuerdos».", "error");
+    throw error;
+  }
+}
+
+// No se debe confiar solo en el control visual de acceso: Apps Script valida
+// nuevamente el token Firebase y el correo autorizado en cada operación.
 
 // ---------- Utilidades generales ----------
 
@@ -249,30 +431,37 @@ function setButtonDisabled(button, disabled) {
 }
 
 // ---------- Autenticación con Firebase ----------
-// Reemplazá los tres textos de ejemplo por las tres direcciones autorizadas.
-// Esto controla el acceso a la interfaz; la seguridad definitiva también debe
-// aplicarse en el backend antes de habilitar el almacenamiento en Google Drive.
 const AUTHORIZED_EMAILS = [
   "mauricio.ariel.buda@gmail.com",
   "wakeuprodiaz@gmail.com",
-  "recuerdos.mau.roci@gmail.com",
 ].map((email) => email.trim().toLocaleLowerCase("es-AR"));
 
 let isSigningIn = false;
 
-function showAuthenticatedApp(user) {
+async function showAuthenticatedApp(user) {
   elements.loginSection.hidden = true;
   elements.privateApp.hidden = false;
   elements.currentUser.hidden = false;
   elements.currentUser.textContent = user.displayName || user.email || "Sesión iniciada";
   elements.signOutButton.hidden = false;
-  setMessage(
-    elements.loginMessage,
-    "Sesión iniciada con Google. Los recuerdos todavía se guardan solo durante esta sesión y no se almacenan en Drive.",
-    "success",
-  );
-  renderFolders();
-  renderMemories();
+
+  if (state.backendReady && state.backendUserUid === user.uid) {
+    renderFolders();
+    renderMemories();
+    return;
+  }
+  if (state.backendLoadPromise) {
+    try { await state.backendLoadPromise; } catch (_) { /* el primer intento ya mostró el error */ }
+    return;
+  }
+  state.backendLoadPromise = refreshDataFromDrive();
+  try {
+    await state.backendLoadPromise;
+  } catch (_) {
+    // El detalle ya se muestra en la sección de recuerdos y en la consola.
+  } finally {
+    state.backendLoadPromise = null;
+  }
 }
 
 function showLogin() {
@@ -282,6 +471,8 @@ function showLogin() {
   elements.loginSection.hidden = false;
   elements.currentUser.hidden = true;
   elements.signOutButton.hidden = true;
+  state.backendReady = false;
+  state.backendUserUid = null;
 }
 
 if (elements.signInButton) {
@@ -297,30 +488,25 @@ elements.signInButton?.addEventListener("click", async () => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
     const email = result.user.email?.trim().toLocaleLowerCase("es-AR");
-
     if (!email || !AUTHORIZED_EMAILS.includes(email)) {
       await signOut(auth);
       showLogin();
-      setMessage(
-        elements.loginMessage,
-        "Esta cuenta de Google no está autorizada para ingresar. Usá una de las tres cuentas habilitadas.",
-        "error",
-      );
+      setMessage(elements.loginMessage, "Esta cuenta de Google no está autorizada. Usá una de las dos cuentas habilitadas.", "error");
       return;
     }
-
-    showAuthenticatedApp(result.user);
+    await showAuthenticatedApp(result.user);
   } catch (error) {
-    console.error("Error al iniciar sesión con Google:", error);
-    let message = "No se pudo iniciar sesión. Volvé a intentarlo.";
-    if (error?.code === "auth/popup-closed-by-user") {
-      message = "Se cerró la ventana de inicio de sesión antes de completar el acceso.";
-    } else if (error?.code === "auth/unauthorized-domain") {
-      message = "Este dominio no está autorizado en Firebase Authentication. Revisá los dominios autorizados del proyecto.";
-    } else if (error?.code === "auth/popup-blocked") {
-      message = "El navegador bloqueó la ventana emergente. Permití las ventanas emergentes para este sitio y volvé a intentarlo.";
+    console.error("Error al iniciar sesión o conectar con Google Drive:", error);
+    if (auth.currentUser && AUTHORIZED_EMAILS.includes((auth.currentUser.email || "").trim().toLowerCase())) {
+      // No cerramos una sesión válida si el problema está solamente en el backend.
+      setMessage(elements.loginMessage, "La sesión inició, pero no se pudo conectar con Drive. Consultá el mensaje en «Ver recuerdos».", "error");
+    } else {
+      let message = "No se pudo iniciar sesión. Volvé a intentarlo.";
+      if (error?.code === "auth/popup-closed-by-user") message = "Se cerró la ventana de inicio de sesión antes de completar el acceso.";
+      else if (error?.code === "auth/unauthorized-domain") message = "Este dominio no está autorizado en Firebase Authentication. Revisá los dominios autorizados del proyecto.";
+      else if (error?.code === "auth/popup-blocked") message = "El navegador bloqueó la ventana emergente. Permití las ventanas emergentes para este sitio y volvé a intentarlo.";
+      setMessage(elements.loginMessage, message, "error");
     }
-    setMessage(elements.loginMessage, message, "error");
   } finally {
     isSigningIn = false;
     if (elements.signInButton) elements.signInButton.disabled = false;
@@ -343,24 +529,14 @@ onAuthStateChanged(auth, async (user) => {
     showLogin();
     return;
   }
-
-  const email = user.email?.trim().toLocaleLowerCase("es-AR");
+  const email = user.email?.trim().toLowerCase();
   if (!email || !AUTHORIZED_EMAILS.includes(email)) {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error("No se pudo cerrar la sesión de una cuenta no autorizada:", error);
-    }
+    try { await signOut(auth); } catch (error) { console.error("No se pudo cerrar la sesión de una cuenta no autorizada:", error); }
     showLogin();
-    setMessage(
-      elements.loginMessage,
-      "Esta cuenta de Google no está autorizada para ingresar. Usá una de las tres cuentas habilitadas.",
-      "error",
-    );
+    setMessage(elements.loginMessage, "Esta cuenta de Google no está autorizada. Usá una de las dos cuentas habilitadas.", "error");
     return;
   }
-
-  showAuthenticatedApp(user);
+  await showAuthenticatedApp(user);
 });
 
 // ---------- Selección de archivos ----------
@@ -648,10 +824,25 @@ function getFolderCategory() {
 function refreshFolderOptions() {
   const selected = elements.memoryFolder.value;
   elements.memoryFolder.replaceChildren();
-  const unorganized = new Option("Sin organizar", "");
-  elements.memoryFolder.add(unorganized);
+  elements.memoryFolder.add(new Option("Sin organizar", ""));
   state.folders.forEach(folder => elements.memoryFolder.add(new Option(`${folder.title} · ${folder.category}`, folder.id)));
   if ([...elements.memoryFolder.options].some(option => option.value === selected)) elements.memoryFolder.value = selected;
+
+  // Asegura que las categorías personalizadas guardadas en Drive también
+  // aparezcan en el selector de creación de carpetas después de recargar.
+  const selectedFolderCategory = elements.folderCategory.value;
+  const createOption = elements.folderCategory.querySelector('option[value="__crear__"]');
+  const known = new Set([...elements.folderCategory.options].map(option => option.value.toLocaleLowerCase("es-AR")));
+  [...new Set(state.folders.map(folder => folder.category))].sort((a,b)=>a.localeCompare(b,"es-AR")).forEach(category => {
+    if (!known.has(category.toLocaleLowerCase("es-AR"))) {
+      const option = new Option(category, category);
+      elements.folderCategory.insertBefore(option, createOption);
+      known.add(category.toLocaleLowerCase("es-AR"));
+    }
+  });
+  if ([...elements.folderCategory.options].some(option => option.value === selectedFolderCategory)) {
+    elements.folderCategory.value = selectedFolderCategory;
+  }
 
   const selectedCategory = elements.filterCategory.value;
   elements.filterCategory.replaceChildren(new Option("Todas las categorías", ""));
@@ -659,10 +850,14 @@ function refreshFolderOptions() {
   elements.filterCategory.value = [...elements.filterCategory.options].some(o => o.value === selectedCategory) ? selectedCategory : "";
 }
 
-function createFolder(event) {
+async function createFolder(event) {
   event.preventDefault();
   const title = elements.folderTitle.value.trim();
   const category = getFolderCategory();
+  if (!state.backendReady) {
+    setMessage(elements.folderFormMessage, "Todavía no hay conexión con Google Drive. No se guardó la carpeta.", "error");
+    return;
+  }
   if (!title || !category) {
     setMessage(elements.folderFormMessage, "Ingresá un título y elegí una categoría para la carpeta.", "error");
     return;
@@ -671,12 +866,24 @@ function createFolder(event) {
     setMessage(elements.folderFormMessage, "Ya existe una carpeta con ese título.", "error");
     return;
   }
-  state.folders.push({ id: createId(), title, category, createdAt: new Date().toISOString() });
-  elements.folderForm.reset();
-  updateFolderCategoryControl();
-  refreshFolderOptions();
-  renderFolders();
-  setMessage(elements.folderFormMessage, "Carpeta creada en esta sesión.", "success");
+  const submitButton = elements.folderForm.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+  try {
+    setMessage(elements.folderFormMessage, "Guardando carpeta en Google Drive...");
+    const folder = await callDriveBridge("save-folder", { id: createId(), title, category });
+    state.folders.push(folder);
+    elements.folderForm.reset();
+    updateFolderCategoryControl();
+    refreshFolderOptions();
+    renderFolders();
+    renderMemories();
+    setMessage(elements.folderFormMessage, "Carpeta guardada en Google Drive.", "success");
+  } catch (error) {
+    console.error("No se pudo guardar la carpeta:", error);
+    setMessage(elements.folderFormMessage, `No se pudo guardar la carpeta en Drive. ${error.message || error}`, "error");
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
 }
 elements.folderForm?.addEventListener("submit", createFolder);
 
@@ -704,7 +911,7 @@ function renderFolders() {
   });
 }
 
-// ---------- Guardar y editar (solo en memoria del navegador) ----------
+// ---------- Guardar y editar (persistencia en Google Drive) ----------
 
 function resetForm() {
   elements.memoryForm.reset();
@@ -724,7 +931,7 @@ function validateMemoryForm() {
   const description = elements.description.value.trim();
   const memoryDate = elements.memoryDate.value;
   const editingId = elements.memoryId.value;
-  if (state.selectedFiles.length === 0 && !description) {
+  if (state.selectedFiles.length === 0 && !description && !editingId) {
     setMessage(elements.formMessage, "Agregá al menos un archivo o escribí un recuerdo de texto.", "error");
     elements.description.focus();
     return null;
@@ -732,27 +939,17 @@ function validateMemoryForm() {
   return { folderId: elements.memoryFolder.value || "", description, memoryDate, editingId };
 }
 
-function createMemoryRecord({ file, folderId, description, memoryDate, existing }) {
-  const now = new Date();
-  const mediaType = file ? getMediaType(file) : "text";
-  let fileUrl = existing?.fileUrl || "";
-  if (file) fileUrl = registerObjectUrl(file);
-  return {
-    id: existing?.id || createId(), file, fileName: file?.name || existing?.fileName || "",
-    fileType: file?.type || existing?.fileType || "", mediaType, fileUrl,
-    folderId: folderId ?? existing?.folderId ?? "", description, memoryDate: memoryDate || "",
-    uploadedAt: existing?.uploadedAt || now.toISOString(), updatedAt: now.toISOString(),
-  };
-}
-
 async function saveMemory(event) {
   event.preventDefault();
   const formData = validateMemoryForm();
   if (!formData) return;
+  if (!state.backendReady) {
+    setMessage(elements.formMessage, "No hay conexión con Google Drive. El recuerdo no se guardó; reconectá y volvé a intentar.", "error");
+    return;
+  }
 
   const { folderId, description, memoryDate, editingId } = formData;
   const existing = editingId ? state.memories.find((item) => item.id === editingId) : null;
-
   if (editingId && !existing) {
     setMessage(elements.formMessage, "No encontramos el recuerdo que querés editar. Actualizá la lista e intentá de nuevo.", "error");
     return;
@@ -760,63 +957,83 @@ async function saveMemory(event) {
 
   elements.saveButton.disabled = true;
   elements.uploadProgressArea.hidden = false;
-  elements.uploadProgress.value = 10;
-  elements.uploadStatus.textContent = "Preparando recuerdo...";
+  elements.uploadProgress.value = 5;
+  elements.uploadStatus.textContent = "Conectando con Google Drive...";
 
   try {
     if (existing) {
-      const replacementFile = state.selectedFiles[0]?.file || null;
-      if (replacementFile && existing.fileUrl) revokeObjectUrl(existing.fileUrl);
-
-      const updated = createMemoryRecord({
-        file: replacementFile,
+      const replacement = state.selectedFiles[0]?.file || null;
+      elements.uploadStatus.textContent = replacement ? "Subiendo el archivo y guardando los cambios..." : "Guardando los cambios...";
+      elements.uploadProgress.value = 25;
+      const payload = {
+        id: existing.id,
+        isEdit: true,
         folderId,
-        description,
+        // La descripción individual pertenece al archivo; la general es otro campo.
+        description: existing.mediaType === "text" ? "" : (existing.description || ""),
+        generalDescription: description,
         memoryDate,
-        existing: {
-          ...existing,
-          fileUrl: replacementFile ? "" : existing.fileUrl,
-        },
-      });
-
-      // Si no se eligió un archivo nuevo, conservar el tipo y la URL originales.
-      if (!replacementFile) {
-        updated.mediaType = existing.mediaType;
-        updated.file = existing.file;
-        updated.fileName = existing.fileName;
-        updated.fileType = existing.fileType;
-        updated.fileUrl = existing.fileUrl;
+      };
+      if (replacement) {
+        payload.file = {
+          name: replacement.name,
+          mimeType: replacement.type || "application/octet-stream",
+          base64: await fileToBase64(replacement),
+          size: replacement.size,
+        };
       }
-
+      const saved = await callDriveBridge("save-memory", payload);
+      if (replacement && existing.fileUrl) revokeObjectUrl(existing.fileUrl);
+      const updated = {
+        ...saved,
+        file: replacement || existing.file || null,
+        fileUrl: replacement ? registerObjectUrl(replacement) : existing.fileUrl || "",
+      };
       state.memories = state.memories.map((item) => item.id === existing.id ? updated : item);
     } else if (state.selectedFiles.length) {
+      let completed = 0;
+      const total = state.selectedFiles.length;
       for (const entry of state.selectedFiles) {
-        state.memories.unshift(
-          createMemoryRecord({ file: entry.file, folderId, description: entry.description?.trim() || "", memoryDate }),
-        );
+        const file = entry.file;
+        elements.uploadStatus.textContent = `Subiendo ${completed + 1} de ${total}: ${file.name}`;
+        elements.uploadProgress.value = Math.round(10 + (completed / total) * 80);
+        const saved = await callDriveBridge("save-memory", {
+          id: createId(),
+          folderId,
+          description: entry.description?.trim() || "",
+          generalDescription: description,
+          memoryDate,
+          file: {
+            name: file.name,
+            mimeType: file.type || "application/octet-stream",
+            base64: await fileToBase64(file),
+            size: file.size,
+          },
+        });
+        state.memories.unshift({ ...saved, file, fileUrl: registerObjectUrl(file) });
+        completed += 1;
       }
     } else {
-      state.memories.unshift(
-        createMemoryRecord({ file: null, folderId, description, memoryDate }),
-      );
+      elements.uploadStatus.textContent = "Guardando el texto en Google Drive...";
+      const saved = await callDriveBridge("save-memory", {
+        id: createId(), folderId, description: "", generalDescription: description, memoryDate,
+      });
+      state.memories.unshift({ ...saved, file: null, fileUrl: "" });
     }
 
     elements.uploadProgress.value = 100;
-    elements.uploadStatus.textContent = "Recuerdo agregado a la sesión actual.";
+    elements.uploadStatus.textContent = "Recuerdo guardado en Google Drive.";
     renderFolders();
     refreshFolderOptions();
     renderMemories();
     resetForm();
-    setMessage(
-      elements.formMessage,
-      "Listo. El recuerdo está disponible mientras esta página siga abierta; todavía no se guardó en Drive.",
-      "success",
-    );
+    setMessage(elements.formMessage, "Listo. El recuerdo quedó guardado en Google Drive.", "success");
     elements.uploadProgressArea.hidden = true;
     document.querySelector("#recuerdos")?.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
-    console.error("Error al preparar el recuerdo:", error);
-    setMessage(elements.formMessage, "No se pudo preparar el recuerdo. Revisá los datos e intentá nuevamente.", "error");
+    console.error("Error al guardar el recuerdo en Google Drive:", error);
+    elements.uploadStatus.textContent = "No se pudo completar el guardado.";
+    setMessage(elements.formMessage, `No se confirmó el guardado en Google Drive. ${error.message || error}`, "error");
   } finally {
     elements.saveButton.disabled = false;
   }
@@ -834,7 +1051,9 @@ function editMemory(id) {
 
   resetForm();
   elements.memoryId.value = memory.id;
-  elements.description.value = memory.description;
+  // El campo del formulario edita únicamente la descripción general.
+  // Para recuerdos de texto antiguos, description era el único campo disponible.
+  elements.description.value = memory.generalDescription || (memory.mediaType === "text" ? memory.description : "");
   elements.memoryDate.value = memory.memoryDate;
   elements.memoryFolder.value = memory.folderId || "";
 
@@ -856,12 +1075,16 @@ function matchesFilters(memory) {
   const category = elements.filterCategory.value;
   const type = elements.filterType.value;
 
-  const matchesSearch = !search ||
-    memory.description.toLocaleLowerCase("es-AR").includes(search) ||
-    memory.fileName.toLocaleLowerCase("es-AR").includes(search);
+  const searchableText = [memory.description, memory.generalDescription, memory.fileName]
+    .filter(Boolean)
+    .join(" ")
+    .toLocaleLowerCase("es-AR");
+  const matchesSearch = !search || searchableText.includes(search);
 
   const folder = state.folders.find(item => item.id === memory.folderId);
-  const matchesFolder = state.activeFolderId === "all" || (state.activeFolderId === "unorganized" ? !memory.folderId : memory.folderId === state.activeFolderId);
+  const matchesFolder = search
+    ? true // Una búsqueda escrita consulta todos los recuerdos, no solo la carpeta abierta.
+    : (state.activeFolderId === "all" || (state.activeFolderId === "unorganized" ? !memory.folderId : memory.folderId === state.activeFolderId));
   return matchesSearch && matchesFolder &&
     (!category || folder?.category === category) &&
     (!type || memory.mediaType === type);
@@ -880,9 +1103,9 @@ function sortMemories(memories) {
       case "memory-asc":
         return (a.memoryDate || "").localeCompare(b.memoryDate || "");
       case "description-asc":
-        return a.description.localeCompare(b.description, "es-AR");
+        return `${a.generalDescription || ""} ${a.description || ""}`.localeCompare(`${b.generalDescription || ""} ${b.description || ""}`, "es-AR");
       case "description-desc":
-        return b.description.localeCompare(a.description, "es-AR");
+        return `${b.generalDescription || ""} ${b.description || ""}`.localeCompare(`${a.generalDescription || ""} ${a.description || ""}`, "es-AR");
       case "uploaded-desc":
       default:
         return new Date(b.uploadedAt) - new Date(a.uploadedAt);
@@ -928,9 +1151,9 @@ function updatePhotoZoom(nextZoom) {
 function openPhotoViewer(memory) {
   if (!elements.photoViewerDialog || !elements.photoViewerImage || !memory.fileUrl) return;
   elements.photoViewerImage.src = memory.fileUrl;
-  elements.photoViewerImage.alt = memory.description || memory.fileName || "Foto ampliada";
+  elements.photoViewerImage.alt = memory.description || memory.generalDescription || memory.fileName || "Foto ampliada";
   elements.photoViewerImage.onload = () => updatePhotoZoom(1);
-  if (elements.photoViewerCaption) elements.photoViewerCaption.textContent = memory.description || memory.fileName || "Foto";
+  if (elements.photoViewerCaption) elements.photoViewerCaption.textContent = memory.description || memory.generalDescription || memory.fileName || "Foto";
   if (elements.photoViewerStage) elements.photoViewerStage.scrollTop = 0;
   if (typeof elements.photoViewerDialog.showModal === "function") {
     elements.photoViewerDialog.showModal();
@@ -964,10 +1187,17 @@ elements.photoViewerImage?.addEventListener("wheel", (event) => {
 function renderMemoryMedia(memory) {
   const container = makeElement("div", "memory-card-media");
 
+  if (!memory.fileUrl && memory.driveFileId && memory.mediaType !== "text") {
+    container.dataset.memoryId = memory.id;
+    container.classList.add("memory-card-media-pending");
+    container.append(makeElement("div", "memory-card-text-preview", "Cargando archivo desde Drive…"));
+    return container;
+  }
+
   if (memory.mediaType === "image" && memory.fileUrl) {
     const image = document.createElement("img");
     image.src = memory.fileUrl;
-    image.alt = memory.description || memory.fileName || "Foto de un recuerdo";
+    image.alt = memory.description || memory.generalDescription || memory.fileName || "Foto de un recuerdo";
     image.loading = "lazy";
     image.tabIndex = 0;
     image.setAttribute("role", "button");
@@ -997,12 +1227,47 @@ function renderMemoryMedia(memory) {
     const preview = makeElement(
       "div",
       "memory-card-text-preview",
-      memory.mediaType === "text" ? "Un recuerdo escrito" : "Archivo",
+      memory.mediaType === "text" ? "Un recuerdo escrito" : (memory.mediaType === "file" ? "Archivo guardado" : "Archivo"),
     );
     container.append(preview);
   }
-
   return container;
+}
+
+async function loadDriveMediaForContainer(container) {
+  const memoryId = container.dataset.memoryId;
+  const memory = state.memories.find((item) => item.id === memoryId);
+  if (!memory || !memory.driveFileId || memory.fileUrl || container.dataset.loading === "true") return;
+  container.dataset.loading = "true";
+  try {
+    const media = await callDriveBridge("get-media", { fileId: memory.driveFileId });
+    const current = state.memories.find((item) => item.id === memoryId);
+    if (!current) return;
+    current.fileUrl = media.dataUrl;
+    const replacement = renderMemoryMedia(current);
+    container.replaceWith(replacement);
+  } catch (error) {
+    console.error(`No se pudo cargar el archivo ${memory.fileName} desde Drive:`, error);
+    container.replaceChildren(makeElement("div", "memory-card-text-preview", "No se pudo cargar. Recargá e intentá otra vez."));
+    container.dataset.loading = "false";
+  }
+}
+
+function activateLazyDriveMediaLoading() {
+  const pending = elements.memoriesGrid.querySelectorAll(".memory-card-media[data-memory-id]");
+  if (!pending.length) return;
+  if (!("IntersectionObserver" in window)) {
+    pending.forEach((container) => loadDriveMediaForContainer(container));
+    return;
+  }
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      observer.unobserve(entry.target);
+      loadDriveMediaForContainer(entry.target);
+    });
+  }, { rootMargin: "250px" });
+  pending.forEach((container) => observer.observe(container));
 }
 
 function renderMemoryCard(memory) {
@@ -1025,10 +1290,21 @@ function renderMemoryCard(memory) {
   const title = makeElement(
     "h2",
     "memory-card-title",
-    memory.fileName || (memory.description ? "Recuerdo escrito" : "Recuerdo sin título"),
+    memory.fileName || ((memory.generalDescription || memory.description) ? "Recuerdo escrito" : "Recuerdo sin título"),
   );
-  const description = makeElement("p", "memory-card-description", memory.description || "");
-  if (!memory.description) description.hidden = true;
+
+  // Description individual (archivo) y general se muestran en apartados separados.
+  const individualText = memory.mediaType === "text" ? "" : (memory.description || "");
+  const description = makeElement("p", "memory-card-description", individualText);
+  description.hidden = !individualText;
+
+  const generalText = memory.generalDescription || (memory.mediaType === "text" ? memory.description : "");
+  const generalDescription = makeElement(
+    "p",
+    "memory-card-description memory-card-general-description",
+    generalText ? `Descripción general: ${generalText}` : "",
+  );
+  generalDescription.hidden = !generalText;
 
   const dates = makeElement("div", "memory-card-dates");
   const memoryDate = makeElement("div", "memory-card-date");
@@ -1060,14 +1336,32 @@ function renderMemoryCard(memory) {
   moveSelect.add(new Option("Sin organizar", ""));
   state.folders.forEach(folder => moveSelect.add(new Option(`${folder.title} · ${folder.category}`, folder.id)));
   moveSelect.value = memory.folderId || "";
-  moveSelect.addEventListener("change", () => {
-    memory.folderId = moveSelect.value;
-    memory.updatedAt = new Date().toISOString();
-    renderFolders(); renderMemories();
+  moveSelect.addEventListener("change", async () => {
+    const previousFolderId = memory.folderId || "";
+    const nextFolderId = moveSelect.value;
+    if (!state.backendReady) {
+      moveSelect.value = previousFolderId;
+      setMessage(elements.formMessage, "No hay conexión con Google Drive; no se movió el recuerdo.", "error");
+      return;
+    }
+    moveSelect.disabled = true;
+    try {
+      const result = await callDriveBridge("move-memory", { id: memory.id, folderId: nextFolderId });
+      memory.folderId = result.folderId || "";
+      memory.updatedAt = result.updatedAt;
+      renderFolders();
+      renderMemories();
+    } catch (error) {
+      console.error("No se pudo mover el recuerdo:", error);
+      moveSelect.value = previousFolderId;
+      setMessage(elements.formMessage, `No se pudo mover el recuerdo. ${error.message || error}`, "error");
+    } finally {
+      moveSelect.disabled = false;
+    }
   });
   moveLabel.append(moveSelect);
   actions.append(moveLabel, editButton, deleteButton);
-  body.append(topline, title, description, dates, actions);
+  body.append(topline, title, description, generalDescription, dates, actions);
   card.append(body);
 
   return card;
@@ -1097,14 +1391,22 @@ function renderMemories() {
   const fragment = document.createDocumentFragment();
   filtered.forEach((memory) => fragment.append(renderMemoryCard(memory)));
   elements.memoriesGrid.append(fragment);
+  activateLazyDriveMediaLoading();
 }
 
-[
-  elements.search,
-  elements.filterCategory,
-  elements.filterType,
-  elements.sort,
-].forEach((control) => {
+// La búsqueda por texto es global: al escribir, salimos de la carpeta abierta
+// para encontrar también recuerdos guardados en otras carpetas.
+function handleSearchChange() {
+  if (elements.search.value.trim()) {
+    state.activeFolderId = "all";
+  }
+  renderMemories();
+}
+
+elements.search?.addEventListener("input", handleSearchChange);
+elements.search?.addEventListener("change", handleSearchChange);
+
+[ elements.filterCategory, elements.filterType, elements.sort ].forEach((control) => {
   control?.addEventListener("input", renderMemories);
   control?.addEventListener("change", renderMemories);
 });
@@ -1120,7 +1422,10 @@ elements.clearFiltersButton?.addEventListener("click", () => {
 
 elements.showAllMemoriesButton?.addEventListener("click", () => { state.activeFolderId = "all"; renderMemories(); });
 elements.showUnorganizedButton?.addEventListener("click", () => { state.activeFolderId = "unorganized"; renderMemories(); });
-elements.retryMemoriesButton?.addEventListener("click", renderMemories);
+elements.retryMemoriesButton?.addEventListener("click", async () => {
+  try { await refreshDataFromDrive(); }
+  catch (_) { /* refreshDataFromDrive ya muestra el error */ }
+});
 
 // ---------- Eliminar recuerdos (confirmación) ----------
 
@@ -1129,7 +1434,7 @@ function askDeleteMemory(id) {
   if (typeof elements.deleteDialog.showModal === "function") {
     elements.deleteDialog.showModal();
   } else {
-    const accepted = window.confirm("¿Querés eliminar este recuerdo de la sesión actual?");
+    const accepted = window.confirm("¿Querés eliminar este recuerdo de Google Drive?");
     if (accepted) deleteMemory(id);
   }
 }
@@ -1150,14 +1455,24 @@ elements.confirmDeleteButton?.addEventListener("click", (event) => {
   closeDeleteDialog();
 });
 
-function deleteMemory(id) {
+async function deleteMemory(id) {
   const memory = state.memories.find((item) => item.id === id);
   if (!memory) return;
-
-  revokeObjectUrl(memory.fileUrl);
-  state.memories = state.memories.filter((item) => item.id !== id);
-  renderFolders();
-  renderMemories();
+  if (!state.backendReady) {
+    setMessage(elements.formMessage, "No hay conexión con Google Drive; no se eliminó el recuerdo.", "error");
+    return;
+  }
+  try {
+    await callDriveBridge("delete-memory", { id });
+    revokeObjectUrl(memory.fileUrl);
+    state.memories = state.memories.filter((item) => item.id !== id);
+    renderFolders();
+    renderMemories();
+    setMessage(elements.formMessage, "Recuerdo eliminado de Google Drive.", "success");
+  } catch (error) {
+    console.error("No se pudo eliminar el recuerdo:", error);
+    setMessage(elements.formMessage, `No se pudo eliminar el recuerdo de Drive. ${error.message || error}`, "error");
+  }
 }
 
 // ---------- Navegación de las dos secciones ----------
