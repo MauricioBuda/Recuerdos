@@ -1,3 +1,6 @@
+import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { auth, googleProvider } from "./firebase.js";
+
 // ============================================================
 // NUESTROS RECUERDOS — lógica inicial de la interfaz
 // Archivo: src/main.js
@@ -245,19 +248,30 @@ function setButtonDisabled(button, disabled) {
   if (button) button.disabled = disabled;
 }
 
-// ---------- Acceso temporal de demostración ----------
-// No es autenticación real. Firebase reemplazará este bloque.
+// ---------- Autenticación con Firebase ----------
+// Reemplazá los tres textos de ejemplo por las tres direcciones autorizadas.
+// Esto controla el acceso a la interfaz; la seguridad definitiva también debe
+// aplicarse en el backend antes de habilitar el almacenamiento en Google Drive.
+const AUTHORIZED_EMAILS = [
+  "mauricio.ariel.buda@gmail.com",
+  "wakeuprodiaz@gmail.com",
+  "recuerdos.mau.roci@gmail.com",
+].map((email) => email.trim().toLocaleLowerCase("es-AR"));
 
-function showLocalDemo() {
+let isSigningIn = false;
+
+function showAuthenticatedApp(user) {
   elements.loginSection.hidden = true;
   elements.privateApp.hidden = false;
   elements.currentUser.hidden = false;
-  elements.currentUser.textContent = "Modo de prueba local";
+  elements.currentUser.textContent = user.displayName || user.email || "Sesión iniciada";
   elements.signOutButton.hidden = false;
   setMessage(
     elements.loginMessage,
-    "Modo de prueba local: no hay autenticación ni guardado permanente.",
+    "Sesión iniciada con Google. Los recuerdos todavía se guardan solo durante esta sesión y no se almacenan en Drive.",
+    "success",
   );
+  renderFolders();
   renderMemories();
 }
 
@@ -271,23 +285,82 @@ function showLogin() {
 }
 
 if (elements.signInButton) {
-  elements.signInButton.textContent = "Entrar a modo de prueba local";
+  elements.signInButton.textContent = "Iniciar sesión con Google";
 }
 
-elements.signInButton?.addEventListener("click", () => {
-  showLocalDemo();
-  setMessage(
-    elements.loginMessage,
-    "Modo de prueba local: no se inició sesión con Google y los recuerdos no se guardan permanentemente.",
-  );
+elements.signInButton?.addEventListener("click", async () => {
+  if (isSigningIn) return;
+  isSigningIn = true;
+  elements.signInButton.disabled = true;
+  setMessage(elements.loginMessage, "Abriendo el inicio de sesión de Google...");
+
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    const email = result.user.email?.trim().toLocaleLowerCase("es-AR");
+
+    if (!email || !AUTHORIZED_EMAILS.includes(email)) {
+      await signOut(auth);
+      showLogin();
+      setMessage(
+        elements.loginMessage,
+        "Esta cuenta de Google no está autorizada para ingresar. Usá una de las tres cuentas habilitadas.",
+        "error",
+      );
+      return;
+    }
+
+    showAuthenticatedApp(result.user);
+  } catch (error) {
+    console.error("Error al iniciar sesión con Google:", error);
+    let message = "No se pudo iniciar sesión. Volvé a intentarlo.";
+    if (error?.code === "auth/popup-closed-by-user") {
+      message = "Se cerró la ventana de inicio de sesión antes de completar el acceso.";
+    } else if (error?.code === "auth/unauthorized-domain") {
+      message = "Este dominio no está autorizado en Firebase Authentication. Revisá los dominios autorizados del proyecto.";
+    } else if (error?.code === "auth/popup-blocked") {
+      message = "El navegador bloqueó la ventana emergente. Permití las ventanas emergentes para este sitio y volvé a intentarlo.";
+    }
+    setMessage(elements.loginMessage, message, "error");
+  } finally {
+    isSigningIn = false;
+    if (elements.signInButton) elements.signInButton.disabled = false;
+  }
 });
 
-elements.signOutButton?.addEventListener("click", () => {
-  showLogin();
-  setMessage(
-    elements.loginMessage,
-    "Sesión de demostración cerrada. La autenticación real se implementará con Firebase.",
-  );
+elements.signOutButton?.addEventListener("click", async () => {
+  try {
+    await signOut(auth);
+    showLogin();
+    setMessage(elements.loginMessage, "Cerraste la sesión correctamente.");
+  } catch (error) {
+    console.error("Error al cerrar sesión:", error);
+    setMessage(elements.loginMessage, "No se pudo cerrar la sesión. Volvé a intentarlo.", "error");
+  }
+});
+
+onAuthStateChanged(auth, async (user) => {
+  if (!user) {
+    showLogin();
+    return;
+  }
+
+  const email = user.email?.trim().toLocaleLowerCase("es-AR");
+  if (!email || !AUTHORIZED_EMAILS.includes(email)) {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("No se pudo cerrar la sesión de una cuenta no autorizada:", error);
+    }
+    showLogin();
+    setMessage(
+      elements.loginMessage,
+      "Esta cuenta de Google no está autorizada para ingresar. Usá una de las tres cuentas habilitadas.",
+      "error",
+    );
+    return;
+  }
+
+  showAuthenticatedApp(user);
 });
 
 // ---------- Selección de archivos ----------
