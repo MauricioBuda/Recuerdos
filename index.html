@@ -52,44 +52,9 @@
         <!-- Aplicación privada -->
         <div id="private-app" hidden>
           <nav class="main-navigation" aria-label="Secciones principales">
-            <a class="nav-link" href="#carpetas" data-section-link="carpetas">Carpetas</a>
             <a class="nav-link" href="#subir" data-section-link="subir">Subir un recuerdo</a>
             <a class="nav-link" href="#recuerdos" data-section-link="recuerdos">Ver recuerdos</a>
           </nav>
-
-          <!-- SECCIÓN: CARPETAS -->
-          <section id="carpetas" class="page-section folders-section" aria-labelledby="folders-title">
-            <div class="section-heading">
-              <p class="eyebrow">Organizar momentos</p>
-              <h1 id="folders-title">Nuestras carpetas</h1>
-              <p>Cada carpeta tiene un título y una categoría. Los recuerdos guardan su propia descripción.</p>
-            </div>
-            <form id="folder-form" class="folder-form">
-              <div class="form-grid">
-                <div class="form-control">
-                  <label for="folder-title">Título de la carpeta</label>
-                  <input id="folder-title" name="folderTitle" maxlength="100" required placeholder="Ej.: Vacaciones 2027" />
-                </div>
-                <div class="form-control">
-                  <label for="folder-category">Categoría de la carpeta</label>
-                  <select id="folder-category" name="folderCategory" required>
-                    <option value="">Elegir categoría</option>
-                    <option value="Vacaciones">Vacaciones</option><option value="Familia">Familia</option>
-                    <option value="Pareja">Pareja</option><option value="Amigos">Amigos</option>
-                    <option value="Mascotas">Mascotas</option><option value="Otros">Otros</option>
-                    <option value="__crear__">+ Crear categoría</option>
-                  </select>
-                </div>
-                <div id="new-folder-category-control" class="form-control" hidden>
-                  <label for="new-folder-category">Nueva categoría</label>
-                  <input id="new-folder-category" maxlength="60" placeholder="Ej.: Cumpleaños" />
-                </div>
-              </div>
-              <p id="folder-form-message" class="form-message" role="status" aria-live="polite"></p>
-              <div class="form-actions"><button class="button button-primary" type="submit">Crear carpeta</button></div>
-            </form>
-            <div id="folders-grid" class="folders-grid"></div>
-          </section>
 
           <!-- SECCIÓN 1: SUBIR RECUERDOS -->
           <section id="subir" class="page-section upload-section" aria-labelledby="upload-title">
@@ -242,9 +207,9 @@
                   <div class="form-control form-control-wide">
                     <label for="memory-folder">Carpeta</label>
                     <select id="memory-folder" name="folderId">
-                      <option value="">Sin organizar</option>
+                      <option value="">Archivos sin carpeta asignada</option>
                     </select>
-                    <span class="help-text">La categoría corresponde a la carpeta, no a cada archivo.</span>
+                    <span class="help-text">Elegí una carpeta o dejalo sin asignar.</span>
                   </div>
 
                   <div class="form-control">
@@ -282,26 +247,28 @@
             </div>
 
             <div class="memory-tools">
+              <div class="form-control">
+                <label for="filter-scope">Buscar en</label>
+                <select id="filter-scope" name="searchScope">
+                  <option value="all">Carpetas y archivos</option>
+                  <option value="folders">Carpetas</option>
+                  <option value="files">Archivos</option>
+                </select>
+              </div>
+
               <div class="form-control search-control">
-                <label for="memory-search">Buscar por descripción o nombre de archivo</label>
+                <label for="memory-search">Palabras de títulos, nombres o descripciones</label>
                 <input
                   id="memory-search"
                   name="search"
                   type="search"
-                  placeholder="Ej.: playa, cumpleaños..."
+                  placeholder="Ej.: vacaciones, cumpleaños..."
                   autocomplete="off"
                 />
               </div>
 
-              <div class="form-control">
-                <label for="filter-category">Categoría</label>
-                <select id="filter-category" name="filterCategory">
-                  <option value="">Todas las categorías</option>
-                </select>
-              </div>
-
-              <div class="form-control">
-                <label for="filter-type">Tipo de contenido</label>
+              <div id="filter-type-control" class="form-control">
+                <label for="filter-type">Tipo de archivo</label>
                 <select id="filter-type" name="filterType">
                   <option value="">Todos los tipos</option>
                   <option value="image">Fotos</option>
@@ -311,7 +278,7 @@
                 </select>
               </div>
 
-              <div class="form-control">
+              <div id="sort-control" class="form-control">
                 <label for="sort-memories">Ordenar por</label>
                 <select id="sort-memories" name="sort">
                   <option value="uploaded-desc">Subidos recientemente</option>
@@ -324,11 +291,33 @@
               </div>
             </div>
 
+            <section id="folder-management" class="folder-management" aria-labelledby="folder-management-title">
+              <div class="folder-management-heading">
+                <div>
+                  <h2 id="folder-management-title">Carpetas</h2>
+                  <p>Creá carpetas para organizar los recuerdos. Los archivos sin asignar quedan en la carpeta predeterminada.</p>
+                </div>
+                <p id="folders-count" class="folder-count" aria-live="polite">Cargando carpetas...</p>
+              </div>
+
+              <form id="folder-form" class="folder-form">
+                <div class="form-control">
+                  <label for="folder-title">Nombre de la carpeta</label>
+                  <input id="folder-title" name="folderTitle" maxlength="100" required placeholder="Ej.: Vacaciones 2027" />
+                </div>
+                <div class="form-actions">
+                  <button class="button button-primary" type="submit">Crear carpeta</button>
+                </div>
+                <p id="folder-form-message" class="form-message" role="status" aria-live="polite"></p>
+              </form>
+
+              <div id="folders-grid" class="folders-grid"></div>
+            </section>
+
             <div class="memories-summary">
               <p id="memories-count" aria-live="polite">Cargando recuerdos...</p>
               <div class="summary-actions">
                 <button id="show-all-memories-button" class="button button-secondary" type="button">Ver todos</button>
-                <button id="show-unorganized-button" class="button button-secondary" type="button">Sin organizar</button>
                 <button id="clear-filters-button" class="button button-quiet" type="button">Limpiar filtros</button>
               </div>
             </div>
