@@ -1284,10 +1284,10 @@ p {
 .photo-viewer-close { margin-left: 4px; font-size: 28px; }
 .photo-zoom-level { min-width: 48px; color: #eee6dc; font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
 .photo-viewer-stage {
-  position: relative; display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; align-items: center; justify-content: center;
-  overflow: auto; overscroll-behavior: contain; touch-action: pan-x pan-y;
+  position: relative; display: block; flex: 1 1 auto; min-width: 0; min-height: 0;
+  overflow: auto; overscroll-behavior: contain; touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch;
 }
-.photo-viewer-image { display: block; flex: 0 0 auto; max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; transform-origin: center center; user-select: none; -webkit-user-drag: none; }
+.photo-viewer-image { display: block; flex: 0 0 auto; max-width: none; max-height: none; width: auto; height: auto; object-fit: contain; margin: auto; transform-origin: center center; user-select: none; -webkit-user-drag: none; touch-action: pan-x pan-y; }
 .photo-viewer-help { flex: 0 0 auto; margin: 0; padding: 10px 16px max(12px, env(safe-area-inset-bottom)); color: #c9c0b7; background: #171513; font-size: 12px; text-align: center; }
 @media (max-width: 560px) {
   .photo-viewer-toolbar { align-items: flex-start; padding-right: 10px; padding-left: 10px; }
