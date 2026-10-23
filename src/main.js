@@ -1898,7 +1898,7 @@ function renderFolders() {
     openButton.type = "button";
     openButton.setAttribute("aria-pressed", String(state.activeFolderId === "unorganized"));
     openButton.append(
-      makeElement("span", "folder-card-icon", "▰"),
+      makeElement("span", "folder-card-icon", "🖼️"),
       makeElement("strong", "", "Archivos sin carpeta asignada"),
       makeElement("span", "folder-card-meta", `${unorganizedCount} ${unorganizedCount === 1 ? "archivo" : "archivos"}`),
     );
@@ -1914,7 +1914,7 @@ function renderFolders() {
     openButton.type = "button";
     openButton.setAttribute("aria-pressed", String(state.activeFolderId === folder.id));
     openButton.append(
-      makeElement("span", "folder-card-icon", "▰"),
+      makeElement("span", "folder-card-icon", "🖼️"),
       makeElement("strong", "", folder.title),
       makeElement("span", "folder-card-meta", `${count} ${count === 1 ? "archivo" : "archivos"}`),
     );
