@@ -40,6 +40,12 @@ const elements = {
 
   memoryForm: $("#memory-form"),
 
+  uploadSection: $("#subir"),
+  uploadSectionToggle: $("#upload-section-toggle"),
+  uploadSectionToggleLabel: $("#upload-section-toggle-label"),
+  uploadSectionToggleIcon: $("#upload-section-toggle-icon"),
+  uploadSectionContent: $("#upload-section-content"),
+
   memoryId: $("#memory-id"),
 
   memoryFolder: $("#memory-folder"),
@@ -109,7 +115,8 @@ const elements = {
   uploadProgressArea: $("#upload-progress-area"),
 
   uploadStatus: $("#upload-status"),
-
+  uploadProgressPercent: $("#upload-progress-percent"),
+  uploadProgressFill: $("#upload-progress-fill"),
   uploadProgress: $("#upload-progress"),
 
 
@@ -465,7 +472,139 @@ async function callDriveBridge(action, payload = {}) {
 
 
 
-function fileToBase64(file) {
+let uploadSectionTransitionId = 0;
+let uploadSectionTransitionTimer = null;
+
+function setUploadSectionExpanded(expanded) {
+  if (!elements.uploadSectionToggle || !elements.uploadSectionContent || !elements.uploadSection) return;
+
+  const isExpanded = Boolean(expanded);
+  const currentlyExpanded = elements.uploadSectionToggle.getAttribute("aria-expanded") === "true";
+  const content = elements.uploadSectionContent;
+  const toggle = elements.uploadSectionToggle;
+  const transitionId = ++uploadSectionTransitionId;
+  const transitionDuration = 900;
+
+  if (uploadSectionTransitionTimer !== null) {
+    window.clearTimeout(uploadSectionTransitionTimer);
+    uploadSectionTransitionTimer = null;
+  }
+
+  if (isExpanded !== currentlyExpanded) {
+    if (isExpanded) {
+      // Reveal the content at height zero, then animate it to its measured height.
+      content.hidden = false;
+      content.inert = false;
+      content.style.overflow = "hidden";
+      content.style.maxHeight = "0px";
+      content.style.opacity = "0";
+      content.style.transform = "translateY(-6px)";
+      void content.offsetHeight;
+
+      window.requestAnimationFrame(() => {
+        if (transitionId !== uploadSectionTransitionId) return;
+
+        content.classList.add("is-expanded");
+        content.style.maxHeight = `${content.scrollHeight}px`;
+        content.style.opacity = "1";
+        content.style.transform = "translateY(0)";
+
+        uploadSectionTransitionTimer = window.setTimeout(() => {
+          if (transitionId !== uploadSectionTransitionId ||
+              toggle.getAttribute("aria-expanded") !== "true") return;
+
+          // Remove the height cap after the animation so the form can resize normally.
+          content.style.maxHeight = "none";
+          content.style.overflow = "";
+          uploadSectionTransitionTimer = null;
+        }, transitionDuration + 40);
+      });
+    } else {
+      // Freeze the current height before collapsing it, and prevent tabbing into it.
+      content.hidden = false;
+      content.inert = true;
+      content.style.overflow = "hidden";
+      content.style.maxHeight = `${content.scrollHeight}px`;
+      content.style.opacity = "1";
+      content.style.transform = "translateY(0)";
+      void content.offsetHeight;
+
+      window.requestAnimationFrame(() => {
+        if (transitionId !== uploadSectionTransitionId) return;
+
+        content.classList.remove("is-expanded");
+        content.style.maxHeight = "0px";
+        content.style.opacity = "0";
+        content.style.transform = "translateY(-6px)";
+
+        uploadSectionTransitionTimer = window.setTimeout(() => {
+          if (transitionId !== uploadSectionTransitionId ||
+              toggle.getAttribute("aria-expanded") === "true") return;
+
+          content.hidden = true;
+          content.style.maxHeight = "";
+          content.style.opacity = "";
+          content.style.transform = "";
+          content.style.overflow = "";
+          uploadSectionTransitionTimer = null;
+        }, transitionDuration + 40);
+      });
+    }
+  }
+
+  toggle.setAttribute("aria-expanded", String(isExpanded));
+  toggle.title = isExpanded
+    ? "Ocultar el formulario para subir un recuerdo"
+    : "Mostrar el formulario para subir un recuerdo";
+
+  if (elements.uploadSectionToggleLabel) {
+    elements.uploadSectionToggleLabel.textContent = isExpanded
+      ? "Ocultar formulario de carga"
+      : "Subir un recuerdo";
+  }
+
+  if (elements.uploadSectionToggleIcon) {
+    elements.uploadSectionToggleIcon.textContent = isExpanded ? "−" : "+";
+  }
+
+  elements.uploadSection.classList.toggle("is-collapsed", !isExpanded);
+} 
+
+elements.uploadSectionToggle?.addEventListener("click", () => {
+  const isExpanded = elements.uploadSectionToggle.getAttribute("aria-expanded") === "true";
+  const isRecording = state.videoRecorder?.state === "recording" || state.audioRecorder?.state === "recording";
+  // No permitir ocultar los controles mientras se edita, guarda o graba.
+  if (isExpanded && (state.isEditing || elements.saveButton?.disabled || isRecording)) return;
+  setUploadSectionExpanded(!isExpanded);
+});
+
+function updateUploadProgress(percent, status) {
+  const value = Math.round(Math.max(0, Math.min(100, Number(percent) || 0)));
+  if (elements.uploadProgress) elements.uploadProgress.setAttribute("aria-valuenow", String(value));
+  if (elements.uploadProgressFill) elements.uploadProgressFill.style.width = `${value}%`;
+  if (elements.uploadProgressPercent) elements.uploadProgressPercent.textContent = `${value}%`;
+  if (status !== undefined && elements.uploadStatus) elements.uploadStatus.textContent = status;
+}
+
+/*
+ * Apps Script no publica eventos de progreso de la transferencia del archivo.
+ * Durante FileReader se muestra el progreso real de preparación; mientras
+ * Google procesa la solicitud, el porcentaje avanza como estimación y se
+ * confirma al recibir respuesta del servidor. No se presenta como porcentaje
+ * exacto de bytes transmitidos.
+ */
+function startEstimatedUploadProgress(start, end) {
+  let value = start;
+  updateUploadProgress(value);
+  const timer = window.setInterval(() => {
+    if (value >= end) return;
+    value = Math.min(end, value + 1);
+    updateUploadProgress(value);
+  }, 450);
+  return () => window.clearInterval(timer);
+}
+
+function fileToBase64(file, onProgress = null) {
 
   if (file.size > MAX_FILE_BYTES) {
 
@@ -477,6 +616,12 @@ function fileToBase64(file) {
 
     const reader = new FileReader();
 
+    reader.onprogress = (event) => {
+      if (typeof onProgress === "function" && event.lengthComputable && event.total > 0) {
+        onProgress(Math.max(0, Math.min(1, event.loaded / event.total)));
+      }
+    };
+
     reader.onerror = () => reject(new Error(`No se pudo leer el archivo «${file.name}».`));
 
     reader.onload = () => {
@@ -487,6 +632,7 @@ function fileToBase64(file) {
 
       if (comma < 0) return reject(new Error(`No se pudo preparar el archivo «${file.name}».`));
 
+      if (typeof onProgress === "function") onProgress(1);
       resolve(result.slice(comma + 1));
 
     };
@@ -924,6 +1070,8 @@ async function showAuthenticatedApp(user) {
 
 
 function showLogin() {
+
+  setMemoryEditingMode(false);
 
   stopCamera();
 
@@ -1652,8 +1800,9 @@ elements.folderForm?.addEventListener("submit", createFolder);
 
 function openFolder(folderId) {
   state.activeFolderId = folderId;
-  // Al abrir una carpeta, la búsqueda deja de restringirse a los resultados anteriores.
-  elements.filterScope.value = "files";
+  // Al abrir una carpeta, mostrar sus archivos y mantener visible el panel de carpetas.
+  // La selección de búsqueda global "Archivos" sigue disponible desde el filtro.
+  elements.filterScope.value = "all";
   elements.search.value = "";
   renderMemories();
   document.querySelector("#recuerdos")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1717,7 +1866,7 @@ async function deleteFolder(folderId) {
       : memory);
     if (state.activeFolderId === folderId) {
       state.activeFolderId = "unorganized";
-      elements.filterScope.value = "files";
+      elements.filterScope.value = "all";
       elements.search.value = "";
     }
     refreshFolderOptions();
@@ -1794,6 +1943,20 @@ function renderFolders() {
 
 
 
+function setMemoryEditingMode(active) {
+  document.body.classList.toggle("is-editing-memory", active);
+  elements.uploadSection?.classList.toggle("is-editing-active", active);
+
+  // Bloquea también el foco por teclado fuera del editor, no solo los clics.
+  document.querySelectorAll(".site-header, .main-navigation, #recuerdos, .site-footer")
+    .forEach((element) => { element.inert = active; });
+
+  const title = $("#upload-title");
+  const eyebrow = $("#upload-eyebrow");
+  if (title) title.textContent = active ? "Editar recuerdo" : "Sumá un recuerdo";
+  if (eyebrow) eyebrow.textContent = active ? "Modificar un momento guardado" : "Guardar un momento";
+}
+
 function resetForm() {
 
   elements.memoryForm.reset();
@@ -1804,6 +1967,8 @@ function resetForm() {
 
   state.isEditing = false;
 
+  setMemoryEditingMode(false);
+
   clearFileInputs();
 
   updateSelectedFiles();
@@ -1813,8 +1978,9 @@ function resetForm() {
   elements.cancelEditButton.hidden = true;
 
   elements.uploadProgressArea.hidden = true;
-
-  elements.uploadProgress.value = 0;
+  elements.uploadProgressArea.classList.remove("has-error");
+  updateUploadProgress(0);
+  setUploadSectionExpanded(false);
 
   setMessage(elements.formMessage, "");
 
@@ -1882,9 +2048,9 @@ async function saveMemory(event) {
 
   elements.uploadProgressArea.hidden = false;
 
-  elements.uploadProgress.value = 5;
+  elements.uploadProgressArea.classList.remove("has-error");
 
-  elements.uploadStatus.textContent = "Conectando con Google Drive...";
+  updateUploadProgress(3, "Preparando el guardado...");
 
 
 
@@ -1893,10 +2059,6 @@ async function saveMemory(event) {
     if (existing) {
 
       const replacement = state.selectedFiles[0]?.file || null;
-
-      elements.uploadStatus.textContent = replacement ? "Subiendo el archivo y guardando los cambios..." : "Guardando los cambios...";
-
-      elements.uploadProgress.value = 25;
 
       const payload = {
 
@@ -1918,13 +2080,17 @@ async function saveMemory(event) {
 
       if (replacement) {
 
+        updateUploadProgress(5, `Preparando archivo: ${replacement.name}`);
+
         payload.file = {
 
           name: replacement.name,
 
           mimeType: replacement.type || "application/octet-stream",
 
-          base64: await fileToBase64(replacement),
+          base64: await fileToBase64(replacement, (fraction) => {
+            updateUploadProgress(5 + fraction * 35, `Preparando archivo: ${replacement.name}`);
+          }),
 
           size: replacement.size,
 
@@ -1932,7 +2098,17 @@ async function saveMemory(event) {
 
       }
 
-      const saved = await callDriveBridge("save-memory", payload);
+      updateUploadProgress(replacement ? 40 : 15,
+        replacement ? "Enviando a Google Drive (progreso estimado)..." : "Guardando cambios (progreso estimado)...");
+
+      const stopEstimatedProgress = startEstimatedUploadProgress(replacement ? 40 : 15, 94);
+
+      let saved;
+      try {
+        saved = await callDriveBridge("save-memory", payload);
+      } finally {
+        stopEstimatedProgress();
+      }
 
       if (replacement && existing.fileUrl) revokeObjectUrl(existing.fileUrl);
 
@@ -1957,52 +2133,75 @@ async function saveMemory(event) {
       for (const entry of state.selectedFiles) {
 
         const file = entry.file;
+        const segmentStart = 5 + (completed / total) * 87;
+        const segmentEnd = 5 + ((completed + 1) / total) * 87;
+        const preparationEnd = segmentStart + (segmentEnd - segmentStart) * 0.45;
+        const transferEnd = segmentStart + (segmentEnd - segmentStart) * 0.96;
 
-        elements.uploadStatus.textContent = `Subiendo ${completed + 1} de ${total}: ${file.name}`;
+        updateUploadProgress(segmentStart, `Preparando archivo ${completed + 1} de ${total}: ${file.name}`);
 
-        elements.uploadProgress.value = Math.round(10 + (completed / total) * 80);
-
-        const saved = await callDriveBridge("save-memory", {
-
-          id: createId(),
-
-          folderId,
-
-          description: entry.description?.trim() || "",
-
-          generalDescription: description,
-
-          memoryDate,
-
-          file: {
-
-            name: file.name,
-
-            mimeType: file.type || "application/octet-stream",
-
-            base64: await fileToBase64(file),
-
-            size: file.size,
-
-          },
-
+        const base64 = await fileToBase64(file, (fraction) => {
+          updateUploadProgress(
+            segmentStart + fraction * (preparationEnd - segmentStart),
+            `Preparando archivo ${completed + 1} de ${total}: ${file.name}`,
+          );
         });
+
+        updateUploadProgress(preparationEnd, `Enviando ${completed + 1} de ${total} a Google Drive (progreso estimado): ${file.name}`);
+
+        const stopEstimatedProgress = startEstimatedUploadProgress(preparationEnd, transferEnd);
+        let saved;
+        try {
+          saved = await callDriveBridge("save-memory", {
+
+            id: createId(),
+
+            folderId,
+
+            description: entry.description?.trim() || "",
+
+            generalDescription: description,
+
+            memoryDate,
+
+            file: {
+
+              name: file.name,
+
+              mimeType: file.type || "application/octet-stream",
+
+              base64,
+
+              size: file.size,
+
+            },
+
+          });
+        } finally {
+          stopEstimatedProgress();
+        }
 
         state.memories.unshift({ ...saved, file, fileUrl: registerObjectUrl(file) });
 
         completed += 1;
-
+        updateUploadProgress(segmentEnd, `Archivo ${completed} de ${total} guardado en Google Drive.`);
       }
 
     } else {
 
-      elements.uploadStatus.textContent = "Guardando el texto en Google Drive...";
+      updateUploadProgress(15, "Guardando texto en Drive (progreso estimado)...");
 
-      const saved = await callDriveBridge("save-memory", {
+      const stopEstimatedProgress = startEstimatedUploadProgress(15, 94);
+      let saved;
+      try {
+        saved = await callDriveBridge("save-memory", {
 
-        id: createId(), folderId, description: "", generalDescription: description, memoryDate,
+          id: createId(), folderId, description: "", generalDescription: description, memoryDate,
 
-      });
+        });
+      } finally {
+        stopEstimatedProgress();
+      }
 
       state.memories.unshift({ ...saved, file: null, fileUrl: "" });
 
@@ -2010,9 +2209,9 @@ async function saveMemory(event) {
 
 
 
-    elements.uploadProgress.value = 100;
-
-    elements.uploadStatus.textContent = "Recuerdo guardado en Google Drive.";
+    updateUploadProgress(100, "Recuerdo guardado en Google Drive.");
+    // Dejar visible el 100% un instante antes de cerrar el indicador.
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
 
     renderFolders();
 
@@ -2032,7 +2231,12 @@ async function saveMemory(event) {
 
     console.error("Error al guardar el recuerdo en Google Drive:", error);
 
-    elements.uploadStatus.textContent = "No se pudo completar el guardado.";
+    elements.uploadProgressArea.classList.add("has-error");
+
+    updateUploadProgress(
+      elements.uploadProgress?.getAttribute("aria-valuenow") || 0,
+      "No se pudo completar el guardado.",
+    );
 
     setMessage(elements.formMessage, `No se confirmó el guardado en Google Drive. ${error.message || error}`, "error");
 
@@ -2043,8 +2247,6 @@ async function saveMemory(event) {
   }
 
 }
-
-
 
 elements.memoryForm?.addEventListener("submit", saveMemory);
 
@@ -2083,6 +2285,9 @@ function editMemory(id) {
 
 
   state.isEditing = true;
+
+  setUploadSectionExpanded(true);
+  setMemoryEditingMode(true);
 
   elements.saveButton.textContent = "Guardar cambios";
 
@@ -2699,11 +2904,13 @@ function renderMemories() {
   $(".memory-tools")?.classList.toggle("folder-search-mode", folderSearchOnly);
 
   const visibleFolderCount = renderFolders();
+  const folderManagement = $("#folder-management");
+  if (folderManagement) folderManagement.hidden = scope === "files";
   const activeFolder = state.folders.find((folder) => folder.id === state.activeFolderId);
   const sectionTitle = $("#memories-title");
   if (sectionTitle) {
     sectionTitle.textContent = scope === "folders"
-      ? "Buscar carpetas"
+      ? (elements.search.value.trim() ? "Buscar carpetas" : "Nuestros recuerdos")
       : activeFolder
         ? activeFolder.title
         : state.activeFolderId === "unorganized"
@@ -2748,7 +2955,7 @@ elements.search?.addEventListener("input", handleSearchChange);
 elements.search?.addEventListener("change", handleSearchChange);
 
 elements.filterScope?.addEventListener("change", () => {
-  if (elements.filterScope.value !== "folders" && elements.search.value.trim()) {
+  if (elements.filterScope.value !== "folders") {
     state.activeFolderId = "all";
   }
   renderMemories();
@@ -2761,7 +2968,7 @@ elements.filterScope?.addEventListener("change", () => {
 
 elements.clearFiltersButton?.addEventListener("click", () => {
   elements.search.value = "";
-  elements.filterScope.value = "all";
+  elements.filterScope.value = "folders";
   elements.filterType.value = "";
   state.activeFolderId = "all";
   elements.sort.value = "uploaded-desc";
@@ -2896,6 +3103,10 @@ document.querySelectorAll("[data-section-link]").forEach((link) => {
     });
 
     link.setAttribute("aria-current", "page");
+
+    if (link.dataset.sectionLink === "subir") {
+      setUploadSectionExpanded(true);
+    }
 
   });
 

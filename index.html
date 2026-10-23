@@ -57,9 +57,21 @@
           </nav>
 
           <!-- SECCIÓN 1: SUBIR RECUERDOS -->
-          <section id="subir" class="page-section upload-section" aria-labelledby="upload-title">
+          <section id="subir" class="page-section upload-section is-collapsed" aria-labelledby="upload-section-toggle-label">
+            <button
+              id="upload-section-toggle"
+              class="button button-secondary upload-section-toggle"
+              type="button"
+              aria-controls="upload-section-content"
+              aria-expanded="false"
+              title="Mostrar el formulario para subir un recuerdo"
+            >
+              <span id="upload-section-toggle-label">Subir un recuerdo</span>
+              <span id="upload-section-toggle-icon" class="upload-section-toggle-icon" aria-hidden="true">+</span>
+            </button>
+            <div id="upload-section-content" class="upload-section-content" hidden>
             <div class="section-heading">
-              <p class="eyebrow">Guardar un momento</p>
+              <p id="upload-eyebrow" class="eyebrow">Guardar un momento</p>
               <h1 id="upload-title">Sumá un recuerdo</h1>
               <p>Elegí un archivo o creá uno ahora. Después, contanos qué significa para ustedes.</p>
             </div>
@@ -221,8 +233,22 @@
               </fieldset>
 
               <div id="upload-progress-area" class="upload-progress-area" hidden>
-                <p id="upload-status" role="status" aria-live="polite">Preparando...</p>
-                <progress id="upload-progress" max="100" value="0">0%</progress>
+                <div class="upload-progress-status">
+                  <span class="upload-spinner" aria-hidden="true"></span>
+                  <p id="upload-status" role="status" aria-live="polite">Preparando...</p>
+                  <strong id="upload-progress-percent">0%</strong>
+                </div>
+                <div
+                  id="upload-progress"
+                  class="upload-progress-track"
+                  role="progressbar"
+                  aria-label="Progreso del guardado"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuenow="0"
+                >
+                  <span id="upload-progress-fill" class="upload-progress-fill"></span>
+                </div>
               </div>
 
               <p id="memory-form-message" class="form-message" role="status" aria-live="polite"></p>
@@ -236,6 +262,7 @@
                 </button>
               </div>
             </form>
+            </div>
           </section>
 
           <!-- SECCIÓN 2: VER RECUERDOS -->
@@ -250,8 +277,8 @@
               <div class="form-control">
                 <label for="filter-scope">Buscar en</label>
                 <select id="filter-scope" name="searchScope">
+                  <option value="folders" selected>Carpetas</option>
                   <option value="all">Carpetas y archivos</option>
-                  <option value="folders">Carpetas</option>
                   <option value="files">Archivos</option>
                 </select>
               </div>
