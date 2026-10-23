@@ -2448,6 +2448,12 @@ p {
 
 }
 
+@media (max-width: 480px) {
+  .upload-section-toggle-icon {
+      padding-bottom: 0px;
+  }
+}
+
 
 
 .upload-section-content {
