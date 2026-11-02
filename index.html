@@ -140,6 +140,24 @@
                 <div id="selected-files" class="selected-files" aria-live="polite">
                   <p class="muted-text">Todavía no seleccionaste ningún archivo.</p>
                 </div>
+
+                <div id="existing-file-name-editor" class="existing-file-name-editor" hidden>
+                  <div class="form-control">
+                    <label for="existing-file-name">Nombre del archivo guardado</label>
+                    <div class="filename-input-group">
+                      <input
+                        id="existing-file-name"
+                        name="existingFileName"
+                        type="text"
+                        maxlength="180"
+                        autocomplete="off"
+                        placeholder="Nombre del archivo"
+                      />
+                      <span id="existing-file-extension" class="filename-extension" aria-hidden="true"></span>
+                    </div>
+                    <span class="help-text">Este cambio renombra el archivo en Google Drive sin volver a subirlo.</span>
+                  </div>
+                </div>
               </fieldset>
 
               <fieldset class="form-fieldset">

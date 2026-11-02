@@ -69,6 +69,9 @@ const elements = {
   audioInput: $("#audio-input"),
 
   selectedFiles: $("#selected-files"),
+  existingFileNameEditor: $("#existing-file-name-editor"),
+  existingFileName: $("#existing-file-name"),
+  existingFileExtension: $("#existing-file-extension"),
 
   description: $("#memory-description"),
 
@@ -186,6 +189,8 @@ const elements = {
 const state = {
 
   selectedFiles: [],
+
+  editingMemory: null,
 
   memories: [],
 
@@ -837,97 +842,174 @@ function getMediaType(file) {
 
 
 
-function updateSelectedFiles() {
-
-  elements.selectedFiles.replaceChildren();
-
-
-
-  if (state.selectedFiles.length === 0) {
-
-    const message = document.createElement("p");
-
-    message.className = "muted-text";
-
-    message.textContent = "Todavía no seleccionaste ningún archivo.";
-
-    elements.selectedFiles.append(message);
-
-    return;
-
+function splitFileName(fileName) {
+  const value = String(fileName || "");
+  const dot = value.lastIndexOf(".");
+  if (dot > 0 && dot < value.length - 1) {
+    return { base: value.slice(0, dot), extension: value.slice(dot) };
   }
-
-
-
-  state.selectedFiles.forEach((entry) => {
-
-    const row = document.createElement("div");
-
-    row.className = "selected-file-item";
-
-
-
-    const name = document.createElement("span");
-
-    name.className = "selected-file-name";
-
-    name.textContent = `${entry.file.name} · ${formatBytes(entry.file.size)}`;
-
-
-
-    const descriptionLabel = document.createElement("label");
-
-    descriptionLabel.className = "selected-file-description-label";
-
-    descriptionLabel.textContent = "Descripción de este archivo (opcional)";
-
-    const descriptionInput = document.createElement("textarea");
-
-    descriptionInput.className = "selected-file-description";
-
-    descriptionInput.rows = 2;
-
-    descriptionInput.maxLength = 2000;
-
-    descriptionInput.placeholder = "Describí este archivo...";
-
-    descriptionInput.value = entry.description || "";
-
-    descriptionInput.addEventListener("input", () => { entry.description = descriptionInput.value; });
-
-    descriptionLabel.append(descriptionInput);
-
-
-
-    const removeButton = document.createElement("button");
-
-    removeButton.className = "button button-quiet";
-
-    removeButton.type = "button";
-
-    removeButton.textContent = "Quitar";
-
-    removeButton.setAttribute("aria-label", `Quitar ${entry.file.name}`);
-
-    removeButton.addEventListener("click", () => {
-
-      state.selectedFiles = state.selectedFiles.filter((item) => item.id !== entry.id);
-
-      updateSelectedFiles();
-
-    });
-
-
-
-    row.append(name, descriptionLabel, removeButton);
-
-    elements.selectedFiles.append(row);
-
-  });
-
+  return { base: value, extension: "" };
 }
 
+function composeFileName(baseName, extension = "") {
+  let base = String(baseName || "")
+    .replace(/[\\/\r\n]/g, "-")
+    .replace(/[\u0000-\u001f]/g, "")
+    .trim();
+  const ext = String(extension || "");
+  if (ext && base.toLowerCase().endsWith(ext.toLowerCase())) {
+    base = base.slice(0, -ext.length).trim();
+  }
+  if (!base) return "";
+  const maxBaseLength = Math.max(1, 180 - ext.length);
+  return `${base.slice(0, maxBaseLength)}${ext}`;
+}
 
+function selectedFileName(entry) {
+  return typeof entry.fileName === "string" ? entry.fileName : entry.file.name;
+}
+
+function releaseSelectedFilePreview(entry) {
+  if (entry?.previewUrl) {
+    URL.revokeObjectURL(entry.previewUrl);
+    entry.previewUrl = "";
+  }
+}
+
+function releaseAllSelectedFilePreviews() {
+  state.selectedFiles.forEach(releaseSelectedFilePreview);
+}
+
+function getSelectedPreviewKind(file) {
+  const type = String(file.type || "").toLowerCase();
+  const name = String(file.name || "").toLowerCase();
+  if (type.startsWith("image/") || /\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)$/i.test(name)) return "image";
+  if (type.startsWith("video/") || /\.(mp4|mov|m4v|webm|3gp|avi|mkv)$/i.test(name)) return "video";
+  if (type.startsWith("audio/") || /\.(mp3|m4a|aac|wav|ogg|opus|flac)$/i.test(name)) return "audio";
+  return "file";
+}
+
+function updateExistingFileNameEditor() {
+  const memory = state.editingMemory;
+  const showEditor = Boolean(
+    state.isEditing &&
+    memory?.driveFileId &&
+    state.selectedFiles.length === 0 &&
+    elements.existingFileNameEditor &&
+    elements.existingFileName &&
+    elements.existingFileExtension
+  );
+
+  if (elements.existingFileNameEditor) {
+    elements.existingFileNameEditor.hidden = !showEditor;
+  }
+
+  if (showEditor) {
+    const parts = splitFileName(memory.fileName || "");
+    elements.existingFileExtension.textContent = parts.extension;
+  }
+}
+
+function updateSelectedFiles() {
+  elements.selectedFiles.replaceChildren();
+
+  if (state.selectedFiles.length === 0) {
+    const message = document.createElement("p");
+    message.className = "muted-text";
+    message.textContent = "Todavía no seleccionaste ningún archivo.";
+    elements.selectedFiles.append(message);
+    updateExistingFileNameEditor();
+    return;
+  }
+
+  state.selectedFiles.forEach((entry) => {
+    const row = document.createElement("article");
+    row.className = "selected-file-item";
+
+    const previewKind = getSelectedPreviewKind(entry.file);
+    const preview = document.createElement("div");
+    preview.className = `selected-file-preview selected-file-preview-${previewKind}`;
+    preview.setAttribute("aria-hidden", "true");
+
+    if (entry.previewUrl && previewKind === "image") {
+      const image = document.createElement("img");
+      image.className = "selected-file-thumbnail";
+      image.src = entry.previewUrl;
+      image.alt = "";
+      image.loading = "lazy";
+      image.addEventListener("error", () => {
+        preview.replaceChildren(makeElement("span", "selected-file-preview-icon", "▧"));
+      }, { once: true });
+      preview.append(image);
+    } else if (entry.previewUrl && previewKind === "video") {
+      const video = document.createElement("video");
+      video.className = "selected-file-thumbnail selected-file-thumbnail-video";
+      video.src = entry.previewUrl;
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = "metadata";
+      preview.append(video, makeElement("span", "selected-file-preview-badge", "VIDEO"));
+    } else {
+      const icon = previewKind === "audio" ? "♫" : previewKind === "video" ? "▷" : "▧";
+      preview.append(makeElement("span", "selected-file-preview-icon", icon));
+    }
+
+    const content = document.createElement("div");
+    content.className = "selected-file-content";
+    const mediaLabel = previewKind === "image" ? "Foto" : previewKind === "video" ? "Video" : previewKind === "audio" ? "Audio" : "Archivo";
+    content.append(makeElement("p", "selected-file-meta", `${formatBytes(entry.file.size)} · ${mediaLabel}`));
+
+    const nameParts = splitFileName(selectedFileName(entry));
+    const nameLabel = document.createElement("label");
+    nameLabel.className = "selected-file-name-label";
+    nameLabel.textContent = "Nombre del archivo";
+    const nameGroup = document.createElement("div");
+    nameGroup.className = "filename-input-group";
+    const nameInput = document.createElement("input");
+    nameInput.className = "selected-file-name-input";
+    nameInput.type = "text";
+    nameInput.maxLength = 180;
+    nameInput.autocomplete = "off";
+    nameInput.value = nameParts.base;
+    nameInput.setAttribute("aria-label", `Nombre del archivo ${entry.file.name}`);
+    nameInput.addEventListener("input", () => {
+      entry.fileName = composeFileName(nameInput.value, nameParts.extension);
+    });
+    const extension = makeElement("span", "filename-extension", nameParts.extension);
+    extension.setAttribute("aria-hidden", "true");
+    nameGroup.append(nameInput, extension);
+    nameLabel.append(nameGroup);
+
+    const descriptionLabel = document.createElement("label");
+    descriptionLabel.className = "selected-file-description-label";
+    descriptionLabel.textContent = "Descripción de este archivo (opcional)";
+    const descriptionInput = document.createElement("textarea");
+    descriptionInput.className = "selected-file-description";
+    descriptionInput.rows = 2;
+    descriptionInput.maxLength = 2000;
+    descriptionInput.placeholder = "Describí este archivo...";
+    descriptionInput.value = entry.description || "";
+    descriptionInput.addEventListener("input", () => { entry.description = descriptionInput.value; });
+    descriptionLabel.append(descriptionInput);
+
+    const removeButton = document.createElement("button");
+    removeButton.className = "button button-quiet selected-file-remove";
+    removeButton.type = "button";
+    removeButton.textContent = "Quitar";
+    removeButton.setAttribute("aria-label", `Quitar ${selectedFileName(entry)}`);
+    removeButton.addEventListener("click", () => {
+      releaseSelectedFilePreview(entry);
+      state.selectedFiles = state.selectedFiles.filter((item) => item.id !== entry.id);
+      updateSelectedFiles();
+    });
+
+    content.append(nameLabel, descriptionLabel, removeButton);
+    row.append(preview, content);
+    elements.selectedFiles.append(row);
+  });
+
+  updateExistingFileNameEditor();
+}
 
 function formatBytes(bytes) {
 
@@ -946,46 +1028,35 @@ function formatBytes(bytes) {
 
 
 function addFiles(fileList) {
-
   const files = Array.from(fileList || []);
-
   if (files.length === 0) return;
 
-
-
   for (const file of files) {
-
     const duplicate = state.selectedFiles.some(
-
       (entry) =>
-
         entry.file.name === file.name &&
-
         entry.file.size === file.size &&
-
         entry.file.lastModified === file.lastModified,
-
     );
 
-
-
     if (!duplicate) {
-
-      state.selectedFiles.push({ id: createId(), file });
-
+      const previewKind = getSelectedPreviewKind(file);
+      const previewUrl = previewKind === "image" || previewKind === "video"
+        ? URL.createObjectURL(file)
+        : "";
+      state.selectedFiles.push({
+        id: createId(),
+        file,
+        fileName: file.name,
+        description: "",
+        previewUrl,
+      });
     }
-
   }
 
-
-
   updateSelectedFiles();
-
   setMessage(elements.formMessage, "");
-
 }
-
-
 
 function clearFileInputs() {
 
@@ -1996,7 +2067,9 @@ function resetForm() {
 
   elements.memoryId.value = "";
 
+  releaseAllSelectedFilePreviews();
   state.selectedFiles = [];
+  state.editingMemory = null;
 
   state.isEditing = false;
 
@@ -2028,6 +2101,22 @@ function validateMemoryForm() {
   const memoryDate = elements.memoryDate.value;
 
   const editingId = elements.memoryId.value;
+
+  const invalidSelectedName = state.selectedFiles.find((entry) => !String(entry.fileName || "").trim());
+  if (invalidSelectedName) {
+    setMessage(elements.formMessage, `Ingresá un nombre para «${invalidSelectedName.file.name}».`, "error");
+    elements.selectedFiles.querySelector(".selected-file-name-input")?.focus();
+    return null;
+  }
+
+  if (state.isEditing && state.editingMemory?.driveFileId && state.selectedFiles.length === 0) {
+    const parts = splitFileName(state.editingMemory.fileName || "");
+    if (!composeFileName(elements.existingFileName?.value, parts.extension)) {
+      setMessage(elements.formMessage, "El nombre del archivo no puede quedar vacío.", "error");
+      elements.existingFileName?.focus();
+      return null;
+    }
+  }
 
   if (state.selectedFiles.length === 0 && !description && !editingId) {
 
@@ -2091,7 +2180,8 @@ async function saveMemory(event) {
 
     if (existing) {
 
-      const replacement = state.selectedFiles[0]?.file || null;
+      const replacementEntry = state.selectedFiles[0] || null;
+      const replacement = replacementEntry?.file || null;
 
       const payload = {
 
@@ -2111,13 +2201,20 @@ async function saveMemory(event) {
 
       };
 
+      if (replacementEntry) {
+        payload.fileName = replacementEntry.fileName;
+      } else if (existing.driveFileId) {
+        const existingParts = splitFileName(existing.fileName || "");
+        payload.fileName = composeFileName(elements.existingFileName?.value, existingParts.extension);
+      }
+
       if (replacement) {
 
         updateUploadProgress(5, `Preparando archivo: ${replacement.name}`);
 
         payload.file = {
 
-          name: replacement.name,
+          name: replacementEntry.fileName,
 
           mimeType: replacement.type || "application/octet-stream",
 
@@ -2199,7 +2296,7 @@ async function saveMemory(event) {
 
             file: {
 
-              name: file.name,
+              name: entry.fileName,
 
               mimeType: file.type || "application/octet-stream",
 
@@ -2315,9 +2412,13 @@ function editMemory(id) {
 
   elements.memoryFolder.value = memory.folderId || "";
 
-
+  state.editingMemory = memory;
+  const existingNameParts = splitFileName(memory.fileName || "");
+  if (elements.existingFileName) elements.existingFileName.value = existingNameParts.base;
+  if (elements.existingFileExtension) elements.existingFileExtension.textContent = existingNameParts.extension;
 
   state.isEditing = true;
+  updateSelectedFiles();
 
   setUploadSectionExpanded(true);
   setMemoryEditingMode(true);
