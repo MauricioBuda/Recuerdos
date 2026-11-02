@@ -51,6 +51,7 @@ const elements = {
   memoryFolder: $("#memory-folder"),
 
   folderForm: $("#folder-form"),
+  cancelFolderButton: $("#cancel-folder-button"),
 
   folderTitle: $("#folder-title"),
 
@@ -59,6 +60,12 @@ const elements = {
   foldersGrid: $("#folders-grid"),
 
   foldersCount: $("#folders-count"),
+
+  filtersToggle: $("#filters-toggle"),
+  filtersToggleIcon: $("#filters-toggle-icon"),
+  filtersContent: $("#filters-content"),
+  activeFolderHeading: $("#active-folder-heading"),
+  activeFolderTitle: $("#active-folder-title"),
 
   showAllMemoriesButton: $("#show-all-memories-button"),
 
@@ -203,6 +210,8 @@ const state = {
 
   activeFolderId: "all",
 
+  folderFormOpen: false,
+
   cameraStream: null,
 
   audioStream: null,
@@ -222,6 +231,12 @@ const state = {
   nextId: 1,
 
   objectUrls: new Set(),
+
+  autoSuggestedMemoryDate: "",
+
+  memoryDateManuallyEdited: false,
+
+  exifSuggestionRequest: 0,
 
   backendReady: false,
 
@@ -1006,6 +1021,7 @@ function updateSelectedFiles() {
       releaseSelectedFilePreview(entry);
       state.selectedFiles = state.selectedFiles.filter((item) => item.id !== entry.id);
       updateSelectedFiles();
+      void updateMemoryDateSuggestion();
     });
 
     content.append(nameLabel, descriptionLabel, removeButton);
@@ -1032,6 +1048,223 @@ function formatBytes(bytes) {
 
 
 
+// ---------- Fecha automática desde metadatos EXIF de fotos JPEG ----------
+
+function isJpegImage(file) {
+  if (!file) return false;
+  const mimeType = String(file.type || "").toLowerCase();
+  const fileName = String(file.name || "").toLowerCase();
+  return mimeType === "image/jpeg" || mimeType === "image/pjpeg" || /\.(jpe?g)$/.test(fileName);
+}
+
+function formatExifDateForInput(value) {
+  const match = /^(\d{4}):(\d{2}):(\d{2})(?:\s|$)/.exec(String(value || "").trim());
+  if (!match) return "";
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > 31) return "";
+
+  const checkedDate = new Date(0);
+  checkedDate.setUTCFullYear(year, month - 1, day);
+  checkedDate.setUTCHours(0, 0, 0, 0);
+  if (
+    checkedDate.getUTCFullYear() !== year ||
+    checkedDate.getUTCMonth() !== month - 1 ||
+    checkedDate.getUTCDate() !== day
+  ) {
+    return "";
+  }
+
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function parseExifDateFromJpegBuffer(buffer) {
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  if (view.byteLength < 4 || view.getUint16(0, false) !== 0xffd8) return "";
+
+  function parseExifSegment(segmentStart, segmentLength) {
+    const payloadStart = segmentStart + 2;
+    const payloadEnd = segmentStart + segmentLength;
+    if (payloadStart + 14 > payloadEnd) return "";
+
+    // El segmento APP1 de EXIF comienza con los seis bytes "Exif\0\0".
+    if (
+      bytes[payloadStart] !== 0x45 ||
+      bytes[payloadStart + 1] !== 0x78 ||
+      bytes[payloadStart + 2] !== 0x69 ||
+      bytes[payloadStart + 3] !== 0x66 ||
+      bytes[payloadStart + 4] !== 0x00 ||
+      bytes[payloadStart + 5] !== 0x00
+    ) {
+      return "";
+    }
+
+    const tiffStart = payloadStart + 6;
+    const littleEndian = bytes[tiffStart] === 0x49 && bytes[tiffStart + 1] === 0x49;
+    const bigEndian = bytes[tiffStart] === 0x4d && bytes[tiffStart + 1] === 0x4d;
+    if (!littleEndian && !bigEndian) return "";
+    if (tiffStart + 8 > payloadEnd) return "";
+
+    const getUint16 = (offset) => {
+      if (offset < tiffStart || offset + 2 > payloadEnd) throw new Error("EXIF fuera de rango");
+      return view.getUint16(offset, littleEndian);
+    };
+    const getUint32 = (offset) => {
+      if (offset < tiffStart || offset + 4 > payloadEnd) throw new Error("EXIF fuera de rango");
+      return view.getUint32(offset, littleEndian);
+    };
+
+    try {
+      if (getUint16(tiffStart + 2) !== 42) return "";
+      const firstIfdOffset = getUint32(tiffStart + 4);
+
+      function readIfdEntries(ifdOffset) {
+        const ifdStart = tiffStart + ifdOffset;
+        const entryCount = getUint16(ifdStart);
+        if (entryCount > 512) return [];
+        const entries = [];
+
+        for (let index = 0; index < entryCount; index += 1) {
+          const entryOffset = ifdStart + 2 + index * 12;
+          if (entryOffset + 12 > payloadEnd) return [];
+          entries.push({
+            tag: getUint16(entryOffset),
+            type: getUint16(entryOffset + 2),
+            count: getUint32(entryOffset + 4),
+            valueOffset: entryOffset + 8,
+          });
+        }
+        return entries;
+      }
+
+      function readAscii(entry) {
+        if (!entry || entry.type !== 2 || entry.count < 1 || entry.count > 256) return "";
+        const byteLength = entry.count;
+        const dataOffset = byteLength <= 4
+          ? entry.valueOffset
+          : tiffStart + getUint32(entry.valueOffset);
+        if (dataOffset < tiffStart || dataOffset + byteLength > payloadEnd) return "";
+
+        let value = "";
+        for (let index = 0; index < byteLength; index += 1) {
+          const code = bytes[dataOffset + index];
+          if (code === 0) break;
+          value += String.fromCharCode(code);
+        }
+        return value.trim();
+      }
+
+      const ifd0Entries = readIfdEntries(firstIfdOffset);
+      const exifIfdEntry = ifd0Entries.find((entry) => entry.tag === 0x8769);
+      let originalDate = "";
+      let digitizedDate = "";
+
+      if (exifIfdEntry && exifIfdEntry.type === 4 && exifIfdEntry.count === 1) {
+        const exifIfdOffset = getUint32(exifIfdEntry.valueOffset);
+        const exifEntries = readIfdEntries(exifIfdOffset);
+        originalDate = readAscii(exifEntries.find((entry) => entry.tag === 0x9003));
+        digitizedDate = readAscii(exifEntries.find((entry) => entry.tag === 0x9004));
+      }
+
+      const generalDate = readAscii(ifd0Entries.find((entry) => entry.tag === 0x0132));
+      return [originalDate, digitizedDate, generalDate]
+        .map(formatExifDateForInput)
+        .find(Boolean) || "";
+    } catch (_) {
+      return "";
+    }
+  }
+
+  let offset = 2;
+  while (offset + 1 < view.byteLength) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    while (offset < view.byteLength && bytes[offset] === 0xff) offset += 1;
+    if (offset >= view.byteLength) break;
+    const marker = bytes[offset];
+    offset += 1;
+
+    if (marker === 0xd9 || marker === 0xda) break;
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (offset + 2 > view.byteLength) break;
+
+    const segmentLength = view.getUint16(offset, false);
+    if (segmentLength < 2 || offset + segmentLength > view.byteLength) break;
+
+    if (marker === 0xe1) {
+      const date = parseExifSegment(offset, segmentLength);
+      if (date) return date;
+    }
+
+    offset += segmentLength;
+  }
+
+  return "";
+}
+
+async function readJpegExifDate(file) {
+  try {
+    // Los metadatos JPEG se encuentran al comienzo del archivo; no hace falta leer la foto completa.
+    const header = await file.slice(0, Math.min(file.size, 1024 * 1024)).arrayBuffer();
+    return parseExifDateFromJpegBuffer(header);
+  } catch (_) {
+    // La ausencia o lectura fallida de metadatos no debe interrumpir la carga.
+    return "";
+  }
+}
+
+async function updateMemoryDateSuggestion() {
+  if (state.memoryDateManuallyEdited || state.isEditing || !elements.memoryDate) return;
+
+  const currentValue = elements.memoryDate.value;
+  if (currentValue && currentValue !== state.autoSuggestedMemoryDate) {
+    state.memoryDateManuallyEdited = true;
+    state.autoSuggestedMemoryDate = "";
+    return;
+  }
+
+  const requestId = ++state.exifSuggestionRequest;
+  const jpegEntries = state.selectedFiles.filter((entry) => isJpegImage(entry.file));
+  let suggestedDate = "";
+
+  if (jpegEntries.length > 0) {
+    const dates = await Promise.all(
+      jpegEntries.map((entry) => entry.exifDatePromise || readJpegExifDate(entry.file)),
+    );
+
+    if (requestId !== state.exifSuggestionRequest) return;
+    const allHaveDate = dates.every(Boolean);
+    const sameDate = allHaveDate && dates.every((date) => date === dates[0]);
+    if (sameDate) suggestedDate = dates[0];
+  }
+
+  if (requestId !== state.exifSuggestionRequest || state.memoryDateManuallyEdited || state.isEditing) return;
+
+  const latestValue = elements.memoryDate.value;
+  if (latestValue && latestValue !== state.autoSuggestedMemoryDate) {
+    state.memoryDateManuallyEdited = true;
+    state.autoSuggestedMemoryDate = "";
+    return;
+  }
+
+  if (suggestedDate) {
+    elements.memoryDate.value = suggestedDate;
+    state.autoSuggestedMemoryDate = suggestedDate;
+  } else {
+    if (state.autoSuggestedMemoryDate && latestValue === state.autoSuggestedMemoryDate) {
+      elements.memoryDate.value = "";
+    }
+    state.autoSuggestedMemoryDate = "";
+  }
+}
+
+
 function addFiles(fileList) {
   const files = Array.from(fileList || []);
   if (files.length === 0) return;
@@ -1055,11 +1288,13 @@ function addFiles(fileList) {
         fileName: file.name,
         description: "",
         previewUrl,
+        exifDatePromise: isJpegImage(file) ? readJpegExifDate(file) : Promise.resolve(""),
       });
     }
   }
 
   updateSelectedFiles();
+  void updateMemoryDateSuggestion();
   setMessage(elements.formMessage, "");
 }
 
@@ -1314,6 +1549,14 @@ onAuthStateChanged(auth, async (user) => {
 // ---------- Selección de archivos ----------
 
 
+
+function preserveManuallyEnteredMemoryDate() {
+  state.memoryDateManuallyEdited = true;
+  state.autoSuggestedMemoryDate = "";
+}
+
+elements.memoryDate?.addEventListener("input", preserveManuallyEnteredMemoryDate);
+elements.memoryDate?.addEventListener("change", preserveManuallyEnteredMemoryDate);
 
 elements.photoInput?.addEventListener("change", (event) => {
 
@@ -1888,6 +2131,30 @@ async function createFolder(event) {
 
 elements.folderForm?.addEventListener("submit", createFolder);
 
+function setFolderFormOpen(open, focusInput = false) {
+  state.folderFormOpen = Boolean(open);
+  if (elements.folderForm) elements.folderForm.hidden = !state.folderFormOpen;
+
+  if (state.folderFormOpen && focusInput) {
+    window.requestAnimationFrame(() => {
+      elements.folderForm?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
+}
+
+elements.cancelFolderButton?.addEventListener("click", () => {
+  elements.folderForm?.reset();
+  setMessage(elements.folderFormMessage, "");
+  setFolderFormOpen(false);
+});
+
+elements.filtersToggle?.addEventListener("click", () => {
+  const expanded = elements.filtersToggle.getAttribute("aria-expanded") !== "true";
+  elements.filtersToggle.setAttribute("aria-expanded", String(expanded));
+  if (elements.filtersContent) elements.filtersContent.hidden = !expanded;
+  if (elements.filtersToggleIcon) elements.filtersToggleIcon.textContent = expanded ? "−" : "+";
+});
+
 function openFolder(folderId) {
   state.activeFolderId = folderId;
   // Al abrir una carpeta, mostrar sus archivos y mantener visible el panel de carpetas.
@@ -1898,9 +2165,11 @@ function openFolder(folderId) {
 
   // Llevar la vista al comienzo de los archivos, no al encabezado de la sección.
   // Si la carpeta está vacía, enfocar el mensaje que informa que no hay recuerdos.
-  const resultsTarget = elements.memoriesEmpty.hidden
-    ? elements.memoriesGrid
-    : elements.memoriesEmpty;
+  const resultsTarget = elements.activeFolderHeading && !elements.activeFolderHeading.hidden
+    ? elements.activeFolderHeading
+    : elements.memoriesEmpty.hidden
+      ? elements.memoriesGrid
+      : elements.memoriesEmpty;
 
   window.requestAnimationFrame(() => {
     if (!resultsTarget || resultsTarget.hidden) return;
@@ -2000,6 +2269,18 @@ function renderFolders() {
     !filterFolderCards || !query || containsSearchTerms(folder.title, query));
   const showUnorganized = !filterFolderCards || !query || containsSearchTerms("Archivos sin carpeta asignada", query);
 
+  const createCard = makeElement("article", "folder-card folder-card-create");
+  const createButton = makeElement("button", "folder-card-open folder-card-create-button");
+  createButton.type = "button";
+  createButton.setAttribute("aria-label", "Crear una carpeta nueva");
+  createButton.append(
+    makeElement("strong", "", "Crear carpeta"),
+    makeElement("span", "folder-card-create-plus", "+"),
+  );
+  createButton.addEventListener("click", () => setFolderFormOpen(true, true));
+  createCard.append(createButton);
+  elements.foldersGrid.append(createCard);
+
   const unorganizedCount = state.memories.filter((memory) => !memory.folderId).length;
   if (showUnorganized) {
     const card = makeElement("article", `folder-card folder-card-special${state.activeFolderId === "unorganized" ? " is-active" : ""}`);
@@ -2040,6 +2321,8 @@ function renderFolders() {
     card.append(openButton, actions);
     elements.foldersGrid.append(card);
   });
+
+  if (elements.folderForm) elements.folderForm.hidden = !state.folderFormOpen;
 
   const totalVisible = visibleFolders.length + (showUnorganized ? 1 : 0);
   if (elements.foldersCount) {
@@ -2089,6 +2372,10 @@ function setMemoryEditingMode(active) {
 function resetForm() {
 
   elements.memoryForm.reset();
+
+  state.exifSuggestionRequest += 1;
+  state.autoSuggestedMemoryDate = "";
+  state.memoryDateManuallyEdited = false;
 
   elements.memoryId.value = "";
   if (elements.existingFileDescription) elements.existingFileDescription.value = "";
@@ -2164,6 +2451,7 @@ async function saveMemory(event) {
 
   event.preventDefault();
 
+  await updateMemoryDateSuggestion();
   const formData = validateMemoryForm();
 
   if (!formData) return;
@@ -2427,6 +2715,7 @@ function editMemory(id) {
 
 
   resetForm();
+  state.memoryDateManuallyEdited = true;
 
   elements.memoryId.value = memory.id;
 
@@ -3192,15 +3481,23 @@ function renderMemories() {
   const folderManagement = $("#folder-management");
   if (folderManagement) folderManagement.hidden = scope === "files";
   const activeFolder = state.folders.find((folder) => folder.id === state.activeFolderId);
+  const activeFolderTitle = activeFolder?.title || (state.activeFolderId === "unorganized"
+    ? "Archivos sin carpeta asignada"
+    : "");
+  const showActiveFolderTitle = scope !== "folders" && Boolean(activeFolderTitle);
+
+  if (elements.activeFolderHeading) {
+    elements.activeFolderHeading.hidden = !showActiveFolderTitle;
+  }
+  if (elements.activeFolderTitle) {
+    elements.activeFolderTitle.textContent = showActiveFolderTitle ? activeFolderTitle : "";
+  }
+
   const sectionTitle = $("#memories-title");
   if (sectionTitle) {
-    sectionTitle.textContent = scope === "folders"
-      ? (elements.search.value.trim() ? "Buscar carpetas" : "Nuestros recuerdos")
-      : activeFolder
-        ? activeFolder.title
-        : state.activeFolderId === "unorganized"
-          ? "Archivos sin carpeta asignada"
-          : "Nuestros recuerdos";
+    sectionTitle.textContent = scope === "folders" && elements.search.value.trim()
+      ? "Buscar carpetas"
+      : "Nuestros recuerdos";
   }
 
   if (scope === "folders") {

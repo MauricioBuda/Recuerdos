@@ -307,7 +307,19 @@
               <p>Entrá a las carpetas o explorá todos los recuerdos, estén organizados o no.</p>
             </div>
 
-            <div class="memory-tools">
+            <div class="filters-disclosure">
+              <button
+                id="filters-toggle"
+                class="button button-secondary filters-toggle"
+                type="button"
+                aria-controls="filters-content"
+                aria-expanded="false"
+              >
+                <span>Buscar y filtrar</span>
+                <span id="filters-toggle-icon" class="filters-toggle-icon" aria-hidden="true">+</span>
+              </button>
+              <div id="filters-content" class="filters-content" hidden>
+                <div class="memory-tools">
               <div class="form-control">
                 <label for="filter-scope">Buscar en</label>
                 <select id="filter-scope" name="searchScope">
@@ -350,7 +362,8 @@
                   <option value="description-desc">Descripción: Z-A</option>
                 </select>
               </div>
-            </div>
+                </div>
+              </div>
 
             <section id="folder-management" class="folder-management" aria-labelledby="folder-management-title">
               <div class="folder-management-heading">
@@ -361,13 +374,14 @@
                 <p id="folders-count" class="folder-count" aria-live="polite">Cargando carpetas...</p>
               </div>
 
-              <form id="folder-form" class="folder-form">
+              <form id="folder-form" class="folder-form" hidden>
                 <div class="form-control">
                   <label for="folder-title">Nombre de la carpeta</label>
                   <input id="folder-title" name="folderTitle" maxlength="100" required placeholder="Ej.: Vacaciones 2027" />
                 </div>
                 <div class="form-actions">
                   <button class="button button-primary" type="submit">Crear carpeta</button>
+                  <button id="cancel-folder-button" class="button button-quiet" type="button">Cancelar</button>
                 </div>
                 <p id="folder-form-message" class="form-message" role="status" aria-live="polite"></p>
               </form>
@@ -381,6 +395,10 @@
                 <button id="show-all-memories-button" class="button button-secondary" type="button">Ver todos</button>
                 <button id="clear-filters-button" class="button button-quiet" type="button">Limpiar filtros</button>
               </div>
+            </div>
+
+            <div id="active-folder-heading" class="active-folder-heading" hidden>
+              <h2 id="active-folder-title"></h2>
             </div>
 
             <div id="memories-loading" class="state-message" role="status" aria-live="polite">
