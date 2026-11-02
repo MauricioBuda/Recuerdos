@@ -173,6 +173,12 @@ const elements = {
 
   photoViewerClose: $("#photo-viewer-close"),
 
+  videoViewerDialog: $("#video-viewer-dialog"),
+  videoViewerTitle: $("#video-viewer-title"),
+  videoViewerPlayer: $("#video-viewer-player"),
+  videoViewerClose: $("#video-viewer-close"),
+  videoViewerStatus: $("#video-viewer-status"),
+
 };
 
 
@@ -2453,7 +2459,9 @@ function updatePhotoZoom(nextZoom) {
 
     const availableHeight = Math.max(1, stage.clientHeight - 24);
 
-    const fitScale = Math.min(availableWidth / image.naturalWidth, availableHeight / image.naturalHeight, 1);
+    // Ajusta la foto al mayor tamaño posible dentro del área visible, sin deformarla.
+    // Se permite ampliar imágenes pequeñas para aprovechar también pantallas grandes.
+    const fitScale = Math.min(availableWidth / image.naturalWidth, availableHeight / image.naturalHeight);
 
     image.style.maxWidth = "none";
 
@@ -2508,6 +2516,117 @@ function closePhotoViewer() {
   if (elements.photoViewerDialog?.open) elements.photoViewerDialog.close();
 
 }
+
+
+
+// Recalcular el ajuste cuando cambia la orientación o el área visible del navegador móvil.
+function refreshPhotoViewerFit() {
+  if (!elements.photoViewerDialog?.open || !elements.photoViewerImage?.naturalWidth) return;
+
+  window.requestAnimationFrame(() => {
+    if (!elements.photoViewerDialog?.open) return;
+    updatePhotoZoom(photoZoom);
+  });
+}
+
+window.addEventListener("resize", refreshPhotoViewerFit);
+window.visualViewport?.addEventListener("resize", refreshPhotoViewerFit);
+
+
+
+// ---------- Reproductor de videos ----------
+
+function resetVideoViewer() {
+  const video = elements.videoViewerPlayer;
+  if (!video) return;
+
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+  if (elements.videoViewerStatus) {
+    elements.videoViewerStatus.textContent = "";
+    elements.videoViewerStatus.hidden = true;
+  }
+}
+
+function openVideoViewer(memory) {
+  const dialog = elements.videoViewerDialog;
+  const video = elements.videoViewerPlayer;
+  if (!dialog || !video || !memory?.fileUrl) return;
+
+  resetVideoViewer();
+  if (elements.videoViewerTitle) {
+    elements.videoViewerTitle.textContent = memory.fileName || memory.description || "Reproduciendo video";
+  }
+  if (elements.videoViewerStatus) elements.videoViewerStatus.hidden = true;
+
+  video.controls = true;
+  video.autoplay = true;
+  video.muted = false;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.src = memory.fileUrl;
+  video.load();
+
+  if (!dialog.open) dialog.showModal();
+
+  // La solicitud se realiza directamente desde el clic del usuario.
+  // Si el navegador no permite Fullscreen API, el diálogo ya ocupa la pantalla.
+  try {
+    if (typeof video.requestFullscreen === "function") {
+      const fullscreenRequest = video.requestFullscreen();
+      fullscreenRequest?.catch(() => {
+        // El reproductor permanece abierto dentro del diálogo como alternativa.
+      });
+    } else if (typeof video.webkitEnterFullscreen === "function") {
+      video.webkitEnterFullscreen();
+    }
+  } catch (error) {
+    console.info("El navegador mantendrá el video dentro del visor de la aplicación:", error);
+  }
+
+  const playback = video.play();
+  playback?.catch((error) => {
+    console.warn("El navegador no pudo iniciar automáticamente el video:", error);
+    if (elements.videoViewerStatus) {
+      elements.videoViewerStatus.textContent = "Tocá reproducir en los controles del video para comenzar.";
+      elements.videoViewerStatus.hidden = false;
+    }
+  });
+}
+
+function closeVideoViewer() {
+  const video = elements.videoViewerPlayer;
+  const dialog = elements.videoViewerDialog;
+  if (!video || !dialog) return;
+
+  if (document.fullscreenElement === video && typeof document.exitFullscreen === "function") {
+    document.exitFullscreen().catch(() => {}).finally(() => {
+      if (dialog.open) dialog.close();
+      else resetVideoViewer();
+    });
+    return;
+  }
+
+  if (video.webkitDisplayingFullscreen && typeof video.webkitExitFullscreen === "function") {
+    try { video.webkitExitFullscreen(); } catch (_) { /* El diálogo igual puede cerrarse. */ }
+  }
+
+  if (dialog.open) dialog.close();
+  else resetVideoViewer();
+}
+
+// El evento close también cubre el cierre mediante Escape del diálogo.
+elements.videoViewerDialog?.addEventListener("close", resetVideoViewer);
+elements.videoViewerClose?.addEventListener("click", closeVideoViewer);
+elements.videoViewerDialog?.addEventListener("click", (event) => {
+  if (event.target === elements.videoViewerDialog) closeVideoViewer();
+});
+elements.videoViewerPlayer?.addEventListener("error", () => {
+  if (!elements.videoViewerStatus) return;
+  elements.videoViewerStatus.textContent = "No se pudo reproducir este video. El formato podría no ser compatible con el navegador.";
+  elements.videoViewerStatus.hidden = false;
+});
 
 
 
@@ -2603,17 +2722,24 @@ function renderMemoryMedia(memory) {
 
   } else if (memory.mediaType === "video" && memory.fileUrl) {
 
+    const preview = makeElement("div", "memory-card-video-preview");
     const video = document.createElement("video");
-
     video.src = memory.fileUrl;
-
-    video.controls = true;
-
+    video.muted = true;
     video.preload = "metadata";
-
     video.playsInline = true;
+    video.tabIndex = -1;
+    video.setAttribute("aria-hidden", "true");
 
-    container.append(video);
+    const playButton = makeElement("button", "memory-card-video-play-button");
+    playButton.type = "button";
+    playButton.setAttribute("aria-label", `Reproducir video: ${memory.fileName || memory.description || "recuerdo"}`);
+    playButton.title = "Reproducir video";
+    playButton.append(makeElement("span", "memory-card-video-play-icon", "▶"));
+    playButton.addEventListener("click", () => openVideoViewer(memory));
+
+    preview.append(video, playButton);
+    container.append(preview);
 
   } else if (memory.mediaType === "audio" && memory.fileUrl) {
 

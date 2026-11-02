@@ -1,4 +1,4 @@
- /* =========================================================
+/* =========================================================
 
    NUESTROS RECUERDOS — estilos globales y responsive
 
@@ -2390,13 +2390,14 @@ p {
 
 .photo-viewer-stage {
 
-  position: relative; display: block; flex: 1 1 auto; min-width: 0; min-height: 0;
-
+  position: relative; display: grid; flex: 1 1 auto; min-width: 0; min-height: 0;
+  grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr);
+  place-items: safe center; padding: 8px;
   overflow: auto; overscroll-behavior: contain; touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch;
 
 }
 
-.photo-viewer-image { display: block; flex: 0 0 auto; max-width: none; max-height: none; width: auto; height: auto; object-fit: contain; margin: auto; transform-origin: center center; user-select: none; -webkit-user-drag: none; touch-action: pan-x pan-y; }
+.photo-viewer-image { display: block; grid-area: 1 / 1; flex: 0 0 auto; max-width: none; max-height: none; width: auto; height: auto; object-fit: contain; margin: 0; transform-origin: center center; user-select: none; -webkit-user-drag: none; touch-action: pan-x pan-y; }
 
 .photo-viewer-help { flex: 0 0 auto; margin: 0; padding: 10px 16px max(12px, env(safe-area-inset-bottom)); color: #c9c0b7; background: #171513; font-size: 12px; text-align: center; }
 
@@ -2848,7 +2849,7 @@ body.is-editing-memory::before {
 
   padding-right: 44px;
 
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23302d2a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http\://www\.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23302d2a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 
   background-repeat: no-repeat;
 
@@ -2857,3 +2858,166 @@ body.is-editing-memory::before {
   background-size: 10px;
 
 }
+
+/* Vista previa de videos y reproductor a pantalla completa */
+.memory-card-video-preview {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #171513;
+}
+
+.memory-card-media .memory-card-video-preview video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.memory-card-video-play-button {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  display: grid;
+  width: 66px;
+  height: 66px;
+  place-items: center;
+  padding: 0 0 0 4px;
+  transform: translate(-50%, -50%);
+  border: 2px solid rgb(255 255 255 / 92%);
+  border-radius: 50%;
+  color: #fff;
+  background: rgb(35 29 25 / 76%);
+  box-shadow: 0 4px 20px rgb(0 0 0 / 35%);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.memory-card-video-play-button:hover,
+.memory-card-video-play-button:focus-visible {
+  background: rgb(118 90 74 / 96%);
+  outline: 3px solid rgb(255 255 255 / 45%);
+  outline-offset: 3px;
+}
+
+.memory-card-video-play-icon {
+  font-size: 27px;
+  line-height: 1;
+}
+
+.video-viewer-dialog {
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  color: #fff;
+  background: #080808;
+}
+
+.video-viewer-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.video-viewer-dialog::backdrop {
+  background: #000;
+}
+
+.video-viewer-layout {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  background: #080808;
+}
+
+.video-viewer-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: max(8px, env(safe-area-inset-top)) 14px 8px;
+  color: #fff;
+  background: #171513;
+}
+
+.video-viewer-title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #f8f4ee;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-viewer-close {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #625a53;
+  border-radius: 10px;
+  color: #fff;
+  background: #302b27;
+  font-size: 27px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.video-viewer-stage {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+  overflow: hidden;
+  background: #000;
+}
+
+.video-viewer-player {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.video-viewer-status {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 8px 14px max(8px, env(safe-area-inset-bottom));
+  color: #f8d9d9;
+  background: #171513;
+  font-size: 12px;
+  text-align: center;
+}
+
+@media (max-width: 560px) {
+  .memory-card-video-play-button {
+    width: 60px;
+    height: 60px;
+  }
+
+  .video-viewer-toolbar {
+    min-height: 48px;
+    padding-right: 10px;
+    padding-left: 12px;
+  }
+
+  .video-viewer-title {
+    font-size: 12px;
+  }
+}
+

@@ -404,6 +404,20 @@
       </form>
     </dialog>
 
+    <!-- Reproductor de videos a pantalla completa -->
+    <dialog id="video-viewer-dialog" class="video-viewer-dialog" aria-labelledby="video-viewer-title">
+      <div class="video-viewer-layout">
+        <div class="video-viewer-toolbar">
+          <p id="video-viewer-title" class="video-viewer-title">Reproduciendo video</p>
+          <button id="video-viewer-close" class="video-viewer-close" type="button" aria-label="Cerrar video" title="Cerrar">×</button>
+        </div>
+        <div class="video-viewer-stage">
+          <video id="video-viewer-player" class="video-viewer-player" controls playsinline preload="metadata"></video>
+        </div>
+        <p id="video-viewer-status" class="video-viewer-status" role="status" aria-live="polite" hidden></p>
+      </div>
+    </dialog>
+
     <!-- Visor de fotos ampliadas -->
     <dialog id="photo-viewer-dialog" class="photo-viewer-dialog" aria-label="Foto ampliada">
       <div class="photo-viewer-layout">
