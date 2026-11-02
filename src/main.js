@@ -227,7 +227,7 @@ const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw2fk8dvKthMnej
 
 const BRIDGE_CHANNEL = "NUESTROS_RECUERDOS_DRIVE_BRIDGE_V1";
 
-const MAX_FILE_BYTES = 12 * 1024 * 1024;
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
 let driveBridgeFrame = null;
 
@@ -306,7 +306,7 @@ function getDriveBridge() {
 
       let belongsToBridge = false;
 
-      for (let level = 0; level < 5 && sourceWindow; level += 1) {
+      while (sourceWindow) {
 
         if (sourceWindow === driveBridgeFrame.contentWindow) {
 
@@ -318,7 +318,11 @@ function getDriveBridge() {
 
         try {
 
-          sourceWindow = sourceWindow.parent;
+          const parentWindow = sourceWindow.parent;
+
+          if (!parentWindow || parentWindow === sourceWindow) break;
+
+          sourceWindow = parentWindow;
 
         } catch (_) {
 
@@ -428,13 +432,17 @@ async function callDriveBridge(action, payload = {}) {
 
   return new Promise((resolve, reject) => {
 
+    // Las transferencias de archivos grandes pueden tardar más que las operaciones comunes.
+    const requestTimeout = action === "save-memory" || action === "get-media"
+      ? 420000
+      : 180000;
     const timeout = setTimeout(() => {
 
       driveBridgePending.delete(requestId);
 
       reject(new Error("La conexión con Google Drive tardó demasiado. Volvé a intentar."));
 
-    }, 180000);
+    }, requestTimeout);
 
     driveBridgePending.set(requestId, { resolve, reject, timeout });
 
@@ -608,7 +616,7 @@ function fileToBase64(file, onProgress = null) {
 
   if (file.size > MAX_FILE_BYTES) {
 
-    throw new Error(`El archivo «${file.name}» supera el límite de 12 MB por archivo. Reducí su tamaño e intentá nuevamente.`);
+    throw new Error(`El archivo «${file.name}» supera el límite de 50 MB por archivo. Reducí su tamaño e intentá nuevamente.`);
 
   }
 
@@ -1805,7 +1813,26 @@ function openFolder(folderId) {
   elements.filterScope.value = "all";
   elements.search.value = "";
   renderMemories();
-  document.querySelector("#recuerdos")?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  // Llevar la vista al comienzo de los archivos, no al encabezado de la sección.
+  // Si la carpeta está vacía, enfocar el mensaje que informa que no hay recuerdos.
+  const resultsTarget = elements.memoriesEmpty.hidden
+    ? elements.memoriesGrid
+    : elements.memoriesEmpty;
+
+  window.requestAnimationFrame(() => {
+    if (!resultsTarget || resultsTarget.hidden) return;
+
+    const headerHeight = $(".site-header")?.getBoundingClientRect().height || 0;
+    const navigationHeight = $(".main-navigation")?.getBoundingClientRect().height || 0;
+    const stickyOffset = headerHeight + navigationHeight + 12;
+    const targetTop = window.scrollY + resultsTarget.getBoundingClientRect().top - stickyOffset;
+
+    window.scrollTo({
+      top: Math.max(0, targetTop),
+      behavior: "smooth",
+    });
+  });
 }
 
 async function renameFolder(folderId) {

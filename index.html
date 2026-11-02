@@ -83,6 +83,17 @@
               <input id="memory-id" name="memoryId" type="hidden" />
 
               <fieldset class="form-fieldset">
+                <legend>¿Dónde guardamos este recuerdo?</legend>
+                <div class="form-control">
+                  <label for="memory-folder">Carpeta</label>
+                  <select id="memory-folder" name="folderId">
+                    <option value="">Archivos sin carpeta asignada</option>
+                  </select>
+                  <span class="help-text">Elegí una carpeta o dejalo sin asignar.</span>
+                </div>
+              </fieldset>
+
+              <fieldset class="form-fieldset">
                 <legend>¿Qué querés guardar?</legend>
 
                 <div class="media-choice-grid">
@@ -216,14 +227,6 @@
                       maxlength="2000"
                       placeholder="Escribí un recuerdo sin adjuntar archivos..."
                     ></textarea>
-                  </div>
-
-                  <div class="form-control form-control-wide">
-                    <label for="memory-folder">Carpeta</label>
-                    <select id="memory-folder" name="folderId">
-                      <option value="">Archivos sin carpeta asignada</option>
-                    </select>
-                    <span class="help-text">Elegí una carpeta o dejalo sin asignar.</span>
                   </div>
 
                   <div class="form-control">
