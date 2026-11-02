@@ -69,9 +69,14 @@ const elements = {
   audioInput: $("#audio-input"),
 
   selectedFiles: $("#selected-files"),
+  mediaSelectionFieldset: $("#media-selection-fieldset"),
   existingFileNameEditor: $("#existing-file-name-editor"),
   existingFileName: $("#existing-file-name"),
   existingFileExtension: $("#existing-file-extension"),
+  createSomethingFieldset: $("#create-something-fieldset"),
+  existingFileDescriptionControl: $("#existing-file-description-control"),
+  existingFileDescription: $("#existing-file-description"),
+  memoryDescriptionLabel: $("#memory-description-label"),
 
   description: $("#memory-description"),
 
@@ -2051,6 +2056,26 @@ function setMemoryEditingMode(active) {
   document.body.classList.toggle("is-editing-memory", active);
   elements.uploadSection?.classList.toggle("is-editing-active", active);
 
+  // En modo edición no se permite seleccionar ni crear archivos nuevos.
+  // Se conservan visibles los datos del recuerdo que sí se pueden modificar.
+  if (elements.mediaSelectionFieldset) elements.mediaSelectionFieldset.hidden = active;
+  if (elements.createSomethingFieldset) elements.createSomethingFieldset.hidden = active;
+
+  const editingExistingFile = Boolean(active && state.editingMemory?.driveFileId);
+  if (elements.existingFileDescriptionControl) {
+    elements.existingFileDescriptionControl.hidden = !editingExistingFile;
+  }
+  if (elements.memoryDescriptionLabel) {
+    elements.memoryDescriptionLabel.textContent = editingExistingFile
+      ? "Descripción grupal"
+      : "Texto del recuerdo (si no adjuntás archivos)";
+  }
+  if (elements.description) {
+    elements.description.placeholder = editingExistingFile
+      ? "Describí el contexto general de este recuerdo..."
+      : "Escribí un recuerdo sin adjuntar archivos...";
+  }
+
   // Bloquea también el foco por teclado fuera del editor, no solo los clics.
   document.querySelectorAll(".site-header, .main-navigation, #recuerdos, .site-footer")
     .forEach((element) => { element.inert = active; });
@@ -2066,6 +2091,7 @@ function resetForm() {
   elements.memoryForm.reset();
 
   elements.memoryId.value = "";
+  if (elements.existingFileDescription) elements.existingFileDescription.value = "";
 
   releaseAllSelectedFilePreviews();
   state.selectedFiles = [];
@@ -2193,7 +2219,9 @@ async function saveMemory(event) {
 
         // La descripción individual pertenece al archivo; la general es otro campo.
 
-        description: existing.mediaType === "text" ? "" : (existing.description || ""),
+        description: existing.mediaType === "text"
+          ? ""
+          : (elements.existingFileDescription?.value.trim() ?? existing.description ?? ""),
 
         generalDescription: description,
 
@@ -2407,6 +2435,9 @@ function editMemory(id) {
   // Para recuerdos de texto antiguos, description era el único campo disponible.
 
   elements.description.value = memory.generalDescription || (memory.mediaType === "text" ? memory.description : "");
+  if (elements.existingFileDescription) {
+    elements.existingFileDescription.value = memory.description || "";
+  }
 
   elements.memoryDate.value = memory.memoryDate;
 
@@ -2431,7 +2462,7 @@ function editMemory(id) {
 
     elements.formMessage,
 
-    "Editando este recuerdo. Si elegís un archivo nuevo, reemplazará el archivo asociado.",
+    "Editando este recuerdo. Podés modificar sus datos sin volver a subir el archivo.",
 
   );
 

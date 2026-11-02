@@ -93,7 +93,7 @@
                 </div>
               </fieldset>
 
-              <fieldset class="form-fieldset">
+              <fieldset id="media-selection-fieldset" class="form-fieldset">
                 <legend>¿Qué querés guardar?</legend>
 
                 <div class="media-choice-grid">
@@ -140,8 +140,9 @@
                 <div id="selected-files" class="selected-files" aria-live="polite">
                   <p class="muted-text">Todavía no seleccionaste ningún archivo.</p>
                 </div>
+              </fieldset>
 
-                <div id="existing-file-name-editor" class="existing-file-name-editor" hidden>
+              <div id="existing-file-name-editor" class="existing-file-name-editor" hidden>
                   <div class="form-control">
                     <label for="existing-file-name">Nombre del archivo guardado</label>
                     <div class="filename-input-group">
@@ -158,9 +159,8 @@
                     <span class="help-text">Este cambio renombra el archivo en Google Drive sin volver a subirlo.</span>
                   </div>
                 </div>
-              </fieldset>
 
-              <fieldset class="form-fieldset">
+              <fieldset id="create-something-fieldset" class="form-fieldset">
                 <legend>Crear algo ahora</legend>
 
                 <div class="capture-grid">
@@ -236,8 +236,19 @@
                 <legend>Contanos sobre este recuerdo</legend>
 
                 <div class="form-grid">
+                  <div id="existing-file-description-control" class="form-control form-control-wide" hidden>
+                    <label for="existing-file-description">Descripción individual</label>
+                    <textarea
+                      id="existing-file-description"
+                      name="existingFileDescription"
+                      rows="3"
+                      maxlength="2000"
+                      placeholder="Describí este archivo..."
+                    ></textarea>
+                  </div>
+
                   <div class="form-control form-control-wide">
-                    <label for="memory-description">Texto del recuerdo (si no adjuntás archivos)</label>
+                    <label id="memory-description-label" for="memory-description">Texto del recuerdo (si no adjuntás archivos)</label>
                     <textarea
                       id="memory-description"
                       name="description"
