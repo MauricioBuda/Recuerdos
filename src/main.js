@@ -2375,12 +2375,12 @@ function setMemoryEditingMode(active) {
   if (elements.memoryDescriptionLabel) {
     elements.memoryDescriptionLabel.textContent = editingExistingFile
       ? "Descripción grupal"
-      : "Texto del recuerdo (si no adjuntás archivos)";
+      : "Se va a aplicar a todos los archivos de este recuerdo";
   }
   if (elements.description) {
     elements.description.placeholder = editingExistingFile
       ? "Describí el contexto general de este recuerdo..."
-      : "Escribí un recuerdo sin adjuntar archivos...";
+      : "Si no adjuntaste archivos, se guarda simplemente como un recuerdo escrito";
   }
 
   // Bloquea también el foco por teclado fuera del editor, no solo los clics.
