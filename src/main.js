@@ -35,6 +35,7 @@ const elements = {
   currentUser: $("#current-user"),
 
   loginMessage: $("#login-message"),
+  favoritesToast: $("#favorites-toast"),
 
 
 
@@ -239,6 +240,8 @@ const state = {
   exifSuggestionRequest: 0,
 
   backendReady: false,
+
+  favoriteToastTimer: null,
 
   backendUserUid: null,
 
@@ -782,6 +785,27 @@ function setMessage(element, message, kind = "") {
 
   element.dataset.kind = kind;
 
+}
+
+
+
+function showFavoriteToast(message, isError = false) {
+  if (!elements.favoritesToast) return;
+
+  if (state.favoriteToastTimer !== null) {
+    window.clearTimeout(state.favoriteToastTimer);
+    state.favoriteToastTimer = null;
+  }
+
+  elements.favoritesToast.textContent = message;
+  elements.favoritesToast.classList.toggle("is-error", isError);
+  elements.favoritesToast.hidden = false;
+
+  state.favoriteToastTimer = window.setTimeout(() => {
+    elements.favoritesToast.hidden = true;
+    elements.favoritesToast.classList.remove("is-error");
+    state.favoriteToastTimer = null;
+  }, 3000);
 }
 
 
@@ -2778,13 +2802,14 @@ function matchesFilters(memory) {
     .join(" ")
     .toLocaleLowerCase("es-AR");
   const matchesSearch = !search || containsSearchTerms(searchableText, search);
-  // Una búsqueda por texto de archivos es global; sin texto se respeta la carpeta abierta.
-  const matchesFolder = search
+  const matchesFavorites = scope !== "favorites" || memory.isFavorite === true;
+  // Favoritos es un filtro global; el resto respeta la carpeta abierta salvo búsqueda textual.
+  const matchesFolder = scope === "favorites" || search
     ? true
     : (state.activeFolderId === "all" || (state.activeFolderId === "unorganized"
       ? !memory.folderId
       : memory.folderId === state.activeFolderId));
-  return matchesSearch && matchesFolder && (!type || memory.mediaType === type);
+  return matchesFavorites && matchesSearch && matchesFolder && (!type || memory.mediaType === type);
 }
 
 
@@ -3268,6 +3293,43 @@ function activateLazyDriveMediaLoading() {
 
 
 
+async function toggleMemoryFavorite(memoryId, button) {
+  const memory = state.memories.find((item) => item.id === memoryId);
+  if (!memory || !state.backendReady || button?.disabled) return;
+
+  const nextFavorite = memory.isFavorite !== true;
+  if (button) {
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+  }
+
+  try {
+    // Solo actualiza el indicador de favorito; no vuelve a guardar otros datos del recuerdo.
+    const saved = await callDriveBridge("set-favorite", {
+      id: memory.id,
+      isFavorite: nextFavorite,
+    });
+
+    const updatedMemory = {
+      ...memory,
+      isFavorite: saved.isFavorite === true,
+    };
+    state.memories = state.memories.map((item) => item.id === memoryId ? updatedMemory : item);
+
+    renderMemories();
+    showFavoriteToast(nextFavorite ? "agregado a favoritos!" : "Quitado de favoritos!");
+  } catch (error) {
+    console.error("No se pudo actualizar el favorito:", error);
+    showFavoriteToast("No se pudo actualizar el favorito.", true);
+  } finally {
+    if (button?.isConnected) {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+    }
+  }
+}
+
+
 function renderMemoryCard(memory) {
 
   const card = makeElement("article", "memory-card");
@@ -3299,6 +3361,15 @@ function renderMemoryCard(memory) {
     })[memory.mediaType] || "Archivo"),
 
   );
+
+  const isFavorite = memory.isFavorite === true;
+  const favoriteButton = makeElement("button", "memory-favorite-button", isFavorite ? "♥" : "♡");
+  favoriteButton.type = "button";
+  favoriteButton.setAttribute("aria-pressed", String(isFavorite));
+  favoriteButton.setAttribute("aria-label", isFavorite ? "Quitar de favoritos" : "Agregar a favoritos");
+  favoriteButton.title = isFavorite ? "Quitar de favoritos" : "Agregar a favoritos";
+  favoriteButton.addEventListener("click", () => toggleMemoryFavorite(memory.id, favoriteButton));
+  topline.append(favoriteButton);
 
 
 
@@ -3479,11 +3550,13 @@ function renderMemories() {
 
   const visibleFolderCount = renderFolders();
   const folderManagement = $("#folder-management");
-  if (folderManagement) folderManagement.hidden = scope === "files";
+  if (folderManagement) folderManagement.hidden = scope === "files" || scope === "favorites";
   const activeFolder = state.folders.find((folder) => folder.id === state.activeFolderId);
-  const activeFolderTitle = activeFolder?.title || (state.activeFolderId === "unorganized"
-    ? "Archivos sin carpeta asignada"
-    : "");
+  const activeFolderTitle = scope === "favorites"
+    ? "Favoritos"
+    : activeFolder?.title || (state.activeFolderId === "unorganized"
+      ? "Archivos sin carpeta asignada"
+      : "");
   const showActiveFolderTitle = scope !== "folders" && Boolean(activeFolderTitle);
 
   if (elements.activeFolderHeading) {
