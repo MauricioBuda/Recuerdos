@@ -84,7 +84,7 @@
               <fieldset class="form-fieldset">
                 <legend>Elegir carpeta</legend>
                 <div class="form-control">
-                  <!-- <label for="memory-folder">Carpeta</label> -->
+                  <label for="memory-folder">Carpeta</label>
                   <select id="memory-folder" name="folderId">
                     <option value="">Archivos sin carpeta asignada</option>
                   </select>
@@ -204,7 +204,7 @@
 
                   <div class="capture-panel">
                     <h2>Grabar un audio</h2>
-                    <!-- <p>Grabá una voz, un mensaje o un sonido para guardar.</p> -->
+                    <p>Grabá una voz, un mensaje o un sonido para guardar.</p>
 
                     <div class="audio-status">
                       <span id="audio-status-indicator" class="status-indicator" aria-hidden="true"></span>
@@ -232,7 +232,7 @@
               </fieldset>
 
               <fieldset class="form-fieldset">
-                <legend>Descripcion genenral</legend>
+                <legend>Contanos sobre este recuerdo</legend>
 
                 <div class="form-grid">
                   <div id="existing-file-description-control" class="form-control form-control-wide" hidden>
@@ -247,13 +247,13 @@
                   </div>
 
                   <div class="form-control form-control-wide">
-                    <label id="memory-description-label" for="memory-description"> Descripción general. Va a aplicar a todos los archivos que se están subiendo </label>
+                    <label id="memory-description-label" for="memory-description">Texto del recuerdo (si no adjuntás archivos)</label>
                     <textarea
                       id="memory-description"
                       name="description"
                       rows="4"
                       maxlength="2000"
-                      placeholder="Si no adjuntaste archivos, se guarda simplemente como un recuerdo escrito"
+                      placeholder="Escribí un recuerdo sin adjuntar archivos..."
                     ></textarea>
                   </div>
 
@@ -477,7 +477,9 @@
           </div>
         </div>
         <div id="photo-viewer-stage" class="photo-viewer-stage">
-          <img id="photo-viewer-image" class="photo-viewer-image" alt="Foto ampliada" />
+          <span id="photo-viewer-loading" class="loading-indicator photo-viewer-loading" role="status" aria-label="Cargando foto original"></span>
+          <p id="photo-viewer-status" class="photo-viewer-status" role="status" aria-live="polite" hidden></p>
+          <img id="photo-viewer-image" class="photo-viewer-image" alt="Foto ampliada" hidden />
         </div>
         <p class="photo-viewer-help">Usá + y −, la rueda del mouse o pellizcá la pantalla para ajustar el zoom. Podés desplazarte por la imagen cuando está ampliada.</p>
       </div>

@@ -698,17 +698,6 @@ margin: 0;
 color: var(--color-muted);
 font-size: 13px;
 }
-
-@media (max-width: 600px) {
-  .memories-summary p {
-  width: 10vh;
-  }
-
-
-  .memories-summary {
-  align-items:center!important;
-  }
-}
 .memories-grid {
 display: grid;
 grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -733,6 +722,30 @@ place-items: center;
 aspect-ratio: 4 / 3;
 background: #eee9e1;
 }
+.memory-card-loading-preview {
+display: grid;
+min-width: 0;
+min-height: 170px;
+grid-auto-flow: row;
+place-content: center;
+justify-items: center;
+gap: 10px;
+padding: 18px;
+color: var(--color-muted);
+font-size: 12px;
+line-height: 1.45;
+text-align: center;
+}
+.memory-card-image-loading {
+grid-area: 1 / 1;
+z-index: 1;
+pointer-events: none;
+background: rgb(238 233 225 / 82%);
+}
+.memory-card-loading-text {
+max-width: 100%;
+}
+.memory-card-media > img { grid-area: 1 / 1; }
 .memory-card-media img,
 .memory-card-media video {
 display: block;
@@ -1211,6 +1224,30 @@ place-items: safe center; padding: 8px;
 overflow: auto; overscroll-behavior: contain; touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch;
 }
 .photo-viewer-image { display: block; grid-area: 1 / 1; flex: 0 0 auto; max-width: none; max-height: none; width: auto; height: auto; object-fit: contain; margin: 0; transform-origin: center center; user-select: none; -webkit-user-drag: none; touch-action: pan-x pan-y; }
+.photo-viewer-loading {
+grid-area: 1 / 1;
+z-index: 2;
+border-color: rgb(248 244 238 / 28%);
+border-top-color: #f8f4ee;
+}
+.photo-viewer-status {
+grid-area: 1 / 1;
+z-index: 2;
+max-width: min(90%, 420px);
+margin: 0;
+padding: 14px 18px;
+border-radius: 10px;
+color: #f8f4ee;
+background: #302b27;
+font-size: 13px;
+line-height: 1.5;
+text-align: center;
+}
+.photo-viewer-image[hidden],
+.photo-viewer-loading[hidden],
+.photo-viewer-status[hidden] {
+display: none !important;
+}
 .photo-viewer-help { flex: 0 0 auto; margin: 0; padding: 10px 16px max(12px, env(safe-area-inset-bottom)); color: #c9c0b7; background: #171513; font-size: 12px; text-align: center; }
 @media (max-width: 560px) {
 .photo-viewer-toolbar { align-items: flex-start; padding-right: 10px; padding-left: 10px; }

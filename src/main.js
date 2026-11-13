@@ -179,6 +179,10 @@ const elements = {
 
   photoViewerStage: $("#photo-viewer-stage"),
 
+  photoViewerLoading: $("#photo-viewer-loading"),
+
+  photoViewerStatus: $("#photo-viewer-status"),
+
   photoZoomOut: $("#photo-zoom-out"),
 
   photoZoomIn: $("#photo-zoom-in"),
@@ -467,7 +471,7 @@ async function callDriveBridge(action, payload = {}) {
   return new Promise((resolve, reject) => {
 
     // Las transferencias de archivos grandes pueden tardar más que las operaciones comunes.
-    const requestTimeout = action === "save-memory" || action === "get-media"
+    const requestTimeout = action === "save-memory" || action === "get-media" || action === "get-thumbnail"
       ? 420000
       : 180000;
     const timeout = setTimeout(() => {
@@ -2375,12 +2379,12 @@ function setMemoryEditingMode(active) {
   if (elements.memoryDescriptionLabel) {
     elements.memoryDescriptionLabel.textContent = editingExistingFile
       ? "Descripción grupal"
-      : "Se va a aplicar a todos los archivos de este recuerdo";
+      : "Texto del recuerdo (si no adjuntás archivos)";
   }
   if (elements.description) {
     elements.description.placeholder = editingExistingFile
       ? "Describí el contexto general de este recuerdo..."
-      : "Si no adjuntaste archivos, se guarda simplemente como un recuerdo escrito";
+      : "Escribí un recuerdo sin adjuntar archivos...";
   }
 
   // Bloquea también el foco por teclado fuera del editor, no solo los clics.
@@ -2931,36 +2935,112 @@ function updatePhotoZoom(nextZoom) {
 
 
 
-function openPhotoViewer(memory) {
+let photoViewerRequestNumber = 0;
 
-  if (!elements.photoViewerDialog || !elements.photoViewerImage || !memory.fileUrl) return;
+async function openPhotoViewer(memory) {
 
-  elements.photoViewerImage.src = memory.fileUrl;
+  if (!elements.photoViewerDialog || !elements.photoViewerImage || !memory?.driveFileId) return;
 
-  elements.photoViewerImage.alt = memory.description || memory.generalDescription || memory.fileName || "Foto ampliada";
+  const requestNumber = ++photoViewerRequestNumber;
+  const image = elements.photoViewerImage;
+  const dialog = elements.photoViewerDialog;
 
-  elements.photoViewerImage.onload = () => updatePhotoZoom(1);
+  image.onload = null;
+  image.onerror = null;
+  image.removeAttribute("src");
+  image.hidden = true;
+
+  if (elements.photoViewerLoading) elements.photoViewerLoading.hidden = false;
+  if (elements.photoViewerStatus) {
+    elements.photoViewerStatus.hidden = true;
+    elements.photoViewerStatus.textContent = "";
+  }
+
+  image.alt = memory.description || memory.generalDescription || memory.fileName || "Foto ampliada";
 
   if (elements.photoViewerCaption) elements.photoViewerCaption.textContent = memory.description || memory.generalDescription || memory.fileName || "Foto";
 
-  if (elements.photoViewerStage) elements.photoViewerStage.scrollTop = 0;
-
-  if (typeof elements.photoViewerDialog.showModal === "function") {
-
-    elements.photoViewerDialog.showModal();
-
-    updatePhotoZoom(1);
-
+  if (elements.photoViewerStage) {
+    elements.photoViewerStage.scrollTop = 0;
+    elements.photoViewerStage.scrollLeft = 0;
   }
 
+  if (typeof dialog.showModal === "function" && !dialog.open) dialog.showModal();
+  if (!dialog.open) return;
+  updatePhotoZoom(1);
+
+  try {
+    // La tarjeta usa solo la miniatura. El original se solicita recién al ampliar.
+    let originalUrl = memory.originalUrl || memory.fileUrl || "";
+
+    if (!originalUrl) {
+      const media = await callDriveBridge("get-media", { fileId: memory.driveFileId });
+      originalUrl = media.dataUrl;
+    }
+
+    if (!originalUrl) throw new Error("Drive no devolvió la imagen original.");
+
+    const current = state.memories.find((item) => item.id === memory.id);
+    if (current) current.originalUrl = originalUrl;
+
+    if (requestNumber !== photoViewerRequestNumber || !dialog.open) return;
+
+    await new Promise((resolve, reject) => {
+      const handleLoad = () => {
+        cleanup();
+        resolve();
+      };
+      const handleError = () => {
+        cleanup();
+        reject(new Error("El navegador no pudo decodificar la imagen original."));
+      };
+      const cleanup = () => {
+        image.removeEventListener("load", handleLoad);
+        image.removeEventListener("error", handleError);
+      };
+
+      image.addEventListener("load", handleLoad, { once: true });
+      image.addEventListener("error", handleError, { once: true });
+      image.src = originalUrl;
+
+      // Una URL ya cacheada puede quedar completa antes de que se registre el evento.
+      if (image.complete) {
+        if (image.naturalWidth > 0) handleLoad();
+        else handleError();
+      }
+    });
+
+    if (requestNumber !== photoViewerRequestNumber || !dialog.open) return;
+
+    image.hidden = false;
+    if (elements.photoViewerLoading) elements.photoViewerLoading.hidden = true;
+    if (elements.photoViewerStatus) elements.photoViewerStatus.hidden = true;
+    updatePhotoZoom(1);
+
+  } catch (error) {
+    if (requestNumber !== photoViewerRequestNumber || !dialog.open) return;
+    console.error(`No se pudo cargar la foto original ${memory.fileName || memory.id}:`, error);
+    if (elements.photoViewerLoading) elements.photoViewerLoading.hidden = true;
+    if (elements.photoViewerStatus) {
+      elements.photoViewerStatus.textContent = "No se pudo cargar la foto original. Cerrá la imagen y volvé a intentarlo.";
+      elements.photoViewerStatus.hidden = false;
+    }
+  }
 }
 
 
 
 function closePhotoViewer() {
 
+  photoViewerRequestNumber += 1;
   if (elements.photoViewerDialog?.open) elements.photoViewerDialog.close();
 
+}
+
+if (elements.photoViewerDialog) {
+  elements.photoViewerDialog.addEventListener("close", () => {
+    photoViewerRequestNumber += 1;
+  });
 }
 
 
@@ -3114,19 +3194,29 @@ elements.photoViewerImage?.addEventListener("wheel", (event) => {
 
 
 
+function createMemoryLoadingPreview(label = "Cargando archivo desde Drive…") {
+  const loading = makeElement("div", "memory-card-loading-preview");
+  const spinner = makeElement("span", "loading-indicator");
+  spinner.setAttribute("aria-hidden", "true");
+  loading.append(spinner, makeElement("span", "memory-card-loading-text", label));
+  return loading;
+}
+
+
+
 function renderMemoryMedia(memory) {
 
   const container = makeElement("div", "memory-card-media");
+  const imagePreviewUrl = memory.thumbnailUrl || memory.originalUrl || memory.fileUrl || "";
+  const hasMediaPreview = memory.mediaType === "image" ? Boolean(imagePreviewUrl) : Boolean(memory.fileUrl);
 
-
-
-  if (!memory.fileUrl && memory.driveFileId && memory.mediaType !== "text") {
+  if (!hasMediaPreview && memory.driveFileId && memory.mediaType !== "text") {
 
     container.dataset.memoryId = memory.id;
 
     container.classList.add("memory-card-media-pending");
 
-    container.append(makeElement("div", "memory-card-text-preview", "Cargando archivo desde Drive…"));
+    container.append(createMemoryLoadingPreview(memory.mediaType === "image" ? "Cargando vista previa desde Drive…" : "Cargando archivo desde Drive…"));
 
     return container;
 
@@ -3134,11 +3224,9 @@ function renderMemoryMedia(memory) {
 
 
 
-  if (memory.mediaType === "image" && memory.fileUrl) {
+  if (memory.mediaType === "image" && imagePreviewUrl) {
 
     const image = document.createElement("img");
-
-    image.src = memory.fileUrl;
 
     image.alt = memory.description || memory.generalDescription || memory.fileName || "Foto de un recuerdo";
 
@@ -3149,6 +3237,15 @@ function renderMemoryMedia(memory) {
     image.setAttribute("role", "button");
 
     image.setAttribute("aria-label", `Ampliar foto: ${image.alt}`);
+
+    const loading = createMemoryLoadingPreview("Preparando vista previa…");
+    loading.classList.add("memory-card-image-loading");
+    container.append(loading, image);
+
+    image.addEventListener("load", () => loading.remove(), { once: true });
+    image.addEventListener("error", () => {
+      loading.replaceChildren(makeElement("span", "memory-card-loading-text", "No se pudo mostrar la vista previa."));
+    }, { once: true });
 
     image.addEventListener("click", () => openPhotoViewer(memory));
 
@@ -3164,7 +3261,7 @@ function renderMemoryMedia(memory) {
 
     });
 
-    container.append(image);
+    image.src = imagePreviewUrl;
 
   } else if (memory.mediaType === "video" && memory.fileUrl) {
 
@@ -3227,29 +3324,49 @@ async function loadDriveMediaForContainer(container) {
 
   const memory = state.memories.find((item) => item.id === memoryId);
 
-  if (!memory || !memory.driveFileId || memory.fileUrl || container.dataset.loading === "true") return;
+  if (!memory || !memory.driveFileId || container.dataset.loading === "true") return;
+  if (memory.mediaType === "image" && (memory.thumbnailUrl || memory.originalUrl || memory.fileUrl)) return;
+  if (memory.mediaType !== "image" && memory.fileUrl) return;
 
   container.dataset.loading = "true";
 
   try {
 
-    const media = await callDriveBridge("get-media", { fileId: memory.driveFileId });
-
     const current = state.memories.find((item) => item.id === memoryId);
-
     if (!current) return;
 
-    current.fileUrl = media.dataUrl;
+    if (current.mediaType === "image") {
+      const thumbnail = await callDriveBridge("get-thumbnail", { fileId: current.driveFileId });
+      const latest = state.memories.find((item) => item.id === memoryId);
+      if (!latest) return;
 
-    const replacement = renderMemoryMedia(current);
+      if (thumbnail && thumbnail.available === true && thumbnail.dataUrl) {
+        latest.thumbnailUrl = thumbnail.dataUrl;
+      } else {
+        // Drive puede no tener miniatura para ciertos archivos: en ese caso se usa el original.
+        const original = await callDriveBridge("get-media", { fileId: latest.driveFileId });
+        const stillCurrent = state.memories.find((item) => item.id === memoryId);
+        if (!stillCurrent) return;
+        stillCurrent.originalUrl = original.dataUrl;
+        stillCurrent.thumbnailUrl = original.dataUrl;
+      }
+    } else {
+      const media = await callDriveBridge("get-media", { fileId: current.driveFileId });
+      const latest = state.memories.find((item) => item.id === memoryId);
+      if (!latest) return;
+      latest.fileUrl = media.dataUrl;
+    }
 
+    const updated = state.memories.find((item) => item.id === memoryId);
+    if (!updated) return;
+    const replacement = renderMemoryMedia(updated);
     container.replaceWith(replacement);
 
   } catch (error) {
 
     console.error(`No se pudo cargar el archivo ${memory.fileName} desde Drive:`, error);
 
-    container.replaceChildren(makeElement("div", "memory-card-text-preview", "No se pudo cargar. Recargá e intentá otra vez."));
+    container.replaceChildren(createMemoryLoadingPreview("No se pudo cargar. Recargá e intentá otra vez."));
 
     container.dataset.loading = "false";
 
